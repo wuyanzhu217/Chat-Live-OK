@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/qt/qml/ccvWriter">
+    <file alias="qmldir">D:/QT/ccvWriter/build/mingw-debug/ccvWriter/qmldir</file>
+  </qresource>
+</RCC>
+

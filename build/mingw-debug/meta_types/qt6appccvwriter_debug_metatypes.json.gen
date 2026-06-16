@@ -1,0 +1,148 @@
+[
+    {
+        "classes": [
+            {
+                "className": "CCVideoWriter",
+                "lineNumber": 77,
+                "object": true,
+                "qualifiedClassName": "CCVideoWriter",
+                "superClasses": [
+                    {
+                        "access": "public",
+                        "name": "QObject"
+                    }
+                ]
+            }
+        ],
+        "inputFile": "ccvideowriter.h",
+        "outputRevision": 69
+    },
+    {
+        "classes": [
+            {
+                "className": "FfmpegAudioCapture",
+                "lineNumber": 11,
+                "object": true,
+                "qualifiedClassName": "FfmpegAudioCapture",
+                "signals": [
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "frame",
+                                "type": "AvFramePtr"
+                            },
+                            {
+                                "name": "ptsMs",
+                                "type": "qint64"
+                            }
+                        ],
+                        "index": 0,
+                        "name": "frameReady",
+                        "returnType": "void"
+                    },
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "peak",
+                                "type": "float"
+                            }
+                        ],
+                        "index": 1,
+                        "name": "levelChanged",
+                        "returnType": "void"
+                    }
+                ],
+                "superClasses": [
+                    {
+                        "access": "public",
+                        "name": "FfmpegCaptureBase"
+                    }
+                ]
+            }
+        ],
+        "inputFile": "FfmpegAudioCapture.h",
+        "outputRevision": 69
+    },
+    {
+        "classes": [
+            {
+                "className": "FfmpegCaptureBase",
+                "lineNumber": 14,
+                "object": true,
+                "qualifiedClassName": "FfmpegCaptureBase",
+                "signals": [
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "state",
+                                "type": "CaptureState"
+                            }
+                        ],
+                        "index": 0,
+                        "name": "stateChanged",
+                        "returnType": "void"
+                    },
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "message",
+                                "type": "QString"
+                            }
+                        ],
+                        "index": 1,
+                        "name": "errorOccurred",
+                        "returnType": "void"
+                    }
+                ],
+                "superClasses": [
+                    {
+                        "access": "public",
+                        "name": "QObject"
+                    }
+                ]
+            }
+        ],
+        "inputFile": "FfmpegCaptureBase.h",
+        "outputRevision": 69
+    },
+    {
+        "classes": [
+            {
+                "className": "FfmpegVideoCapture",
+                "lineNumber": 12,
+                "object": true,
+                "qualifiedClassName": "FfmpegVideoCapture",
+                "signals": [
+                    {
+                        "access": "public",
+                        "arguments": [
+                            {
+                                "name": "frame",
+                                "type": "AvFramePtr"
+                            },
+                            {
+                                "name": "ptsMs",
+                                "type": "qint64"
+                            }
+                        ],
+                        "index": 0,
+                        "name": "frameReady",
+                        "returnType": "void"
+                    }
+                ],
+                "superClasses": [
+                    {
+                        "access": "public",
+                        "name": "FfmpegCaptureBase"
+                    }
+                ]
+            }
+        ],
+        "inputFile": "FfmpegVideoCapture.h",
+        "outputRevision": 69
+    }
+]

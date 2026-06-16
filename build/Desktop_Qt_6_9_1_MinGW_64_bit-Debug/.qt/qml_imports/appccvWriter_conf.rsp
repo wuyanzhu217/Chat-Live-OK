@@ -1,0 +1,14 @@
+-rootPath
+D:/QT/ccvWriter
+-cmake-output
+-output-file
+D:/QT/ccvWriter/build/Desktop_Qt_6_9_1_MinGW_64_bit-Debug/.qt/qml_imports/appccvWriter_conf.cmake
+-importPath
+D:/QT/ccvWriter/build/Desktop_Qt_6_9_1_MinGW_64_bit-Debug/ccvWriter
+-importPath
+D:/QT/ccvWriter/build/Desktop_Qt_6_9_1_MinGW_64_bit-Debug
+-importPath
+E:/QT/6.9.1/mingw_64/qml
+-qrcFiles
+D:/QT/ccvWriter/build/Desktop_Qt_6_9_1_MinGW_64_bit-Debug/.qt/rcc/qmake_ccvWriter.qrc
+D:/QT/ccvWriter/build/Desktop_Qt_6_9_1_MinGW_64_bit-Debug/.qt/rcc/appccvWriter_raw_qml_0.qrc

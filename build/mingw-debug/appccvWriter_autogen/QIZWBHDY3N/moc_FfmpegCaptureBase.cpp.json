@@ -1,0 +1,44 @@
+{
+    "classes": [
+        {
+            "className": "FfmpegCaptureBase",
+            "lineNumber": 14,
+            "object": true,
+            "qualifiedClassName": "FfmpegCaptureBase",
+            "signals": [
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "state",
+                            "type": "CaptureState"
+                        }
+                    ],
+                    "index": 0,
+                    "name": "stateChanged",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "message",
+                            "type": "QString"
+                        }
+                    ],
+                    "index": 1,
+                    "name": "errorOccurred",
+                    "returnType": "void"
+                }
+            ],
+            "superClasses": [
+                {
+                    "access": "public",
+                    "name": "QObject"
+                }
+            ]
+        }
+    ],
+    "inputFile": "FfmpegCaptureBase.h",
+    "outputRevision": 69
+}

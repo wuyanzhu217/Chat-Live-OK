@@ -1,0 +1,36 @@
+{
+    "classes": [
+        {
+            "className": "FfmpegVideoCapture",
+            "lineNumber": 12,
+            "object": true,
+            "qualifiedClassName": "FfmpegVideoCapture",
+            "signals": [
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "frame",
+                            "type": "AvFramePtr"
+                        },
+                        {
+                            "name": "ptsMs",
+                            "type": "qint64"
+                        }
+                    ],
+                    "index": 0,
+                    "name": "frameReady",
+                    "returnType": "void"
+                }
+            ],
+            "superClasses": [
+                {
+                    "access": "public",
+                    "name": "FfmpegCaptureBase"
+                }
+            ]
+        }
+    ],
+    "inputFile": "FfmpegVideoCapture.h",
+    "outputRevision": 69
+}

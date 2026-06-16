@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/qt/qml/ccvWriter/">
+    <file alias="Main.qml">D:/QT/ccvWriter/Main.qml</file>
+  </qresource>
+</RCC>
+

@@ -1,0 +1,5 @@
+module ccvWriter
+typeinfo appccvWriter.qmltypes
+prefer :/qt/qml/ccvWriter/
+Main 1.0 Main.qml
+

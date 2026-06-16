@@ -1,0 +1,10 @@
+-I
+D:/QT/ccvWriter/build/mingw-debug
+-I
+E:/QT/6.9.1/mingw_64/qml
+--resource
+D:/QT/ccvWriter/build/mingw-debug/.qt/rcc/qmake_ccvWriter.qrc
+--resource
+D:/QT/ccvWriter/build/mingw-debug/.qt/rcc/appccvWriter_raw_qml_0.qrc
+--module
+ccvWriter

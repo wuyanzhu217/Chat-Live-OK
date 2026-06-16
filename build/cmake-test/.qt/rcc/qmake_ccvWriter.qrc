@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/qt/qml/ccvWriter">
+    <file alias="qmldir">D:/QT/ccvWriter/build/cmake-test/ccvWriter/qmldir</file>
+  </qresource>
+</RCC>
+

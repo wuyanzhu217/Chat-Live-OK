@@ -1,0 +1,48 @@
+{
+    "classes": [
+        {
+            "className": "FfmpegAudioCapture",
+            "lineNumber": 11,
+            "object": true,
+            "qualifiedClassName": "FfmpegAudioCapture",
+            "signals": [
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "frame",
+                            "type": "AvFramePtr"
+                        },
+                        {
+                            "name": "ptsMs",
+                            "type": "qint64"
+                        }
+                    ],
+                    "index": 0,
+                    "name": "frameReady",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "peak",
+                            "type": "float"
+                        }
+                    ],
+                    "index": 1,
+                    "name": "levelChanged",
+                    "returnType": "void"
+                }
+            ],
+            "superClasses": [
+                {
+                    "access": "public",
+                    "name": "FfmpegCaptureBase"
+                }
+            ]
+        }
+    ],
+    "inputFile": "FfmpegAudioCapture.h",
+    "outputRevision": 69
+}

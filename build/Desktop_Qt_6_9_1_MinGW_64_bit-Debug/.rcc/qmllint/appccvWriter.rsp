@@ -1,0 +1,10 @@
+--bare
+-I
+D:/QT/ccvWriter/build/Desktop_Qt_6_9_1_MinGW_64_bit-Debug
+-I
+E:/QT/6.9.1/mingw_64/qml
+--resource
+D:/QT/ccvWriter/build/Desktop_Qt_6_9_1_MinGW_64_bit-Debug/.qt/rcc/qmake_ccvWriter.qrc
+--resource
+D:/QT/ccvWriter/build/Desktop_Qt_6_9_1_MinGW_64_bit-Debug/.qt/rcc/appccvWriter_raw_qml_0.qrc
+D:/QT/ccvWriter/Main.qml

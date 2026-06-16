@@ -1,0 +1,12 @@
+--bare
+-I
+D:/QT/ccvWriter/build/cmake-test
+-I
+E:/QT/6.9.1/mingw_64/qml
+--resource
+D:/QT/ccvWriter/build/cmake-test/.qt/rcc/qmake_ccvWriter.qrc
+--resource
+D:/QT/ccvWriter/build/cmake-test/.qt/rcc/appccvWriter_raw_qml_0.qrc
+D:/QT/ccvWriter/Main.qml
+--json
+D:/QT/ccvWriter/build/cmake-test/appccvWriter_qmllint.json

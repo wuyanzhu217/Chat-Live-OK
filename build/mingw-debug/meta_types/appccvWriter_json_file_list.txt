@@ -1,0 +1,4 @@
+D:/QT/ccvWriter/build/mingw-debug/appccvWriter_autogen/include/../HHSAIU4YN6/moc_ccvideowriter.cpp.json
+D:/QT/ccvWriter/build/mingw-debug/appccvWriter_autogen/include/../QIZWBHDY3N/moc_FfmpegAudioCapture.cpp.json
+D:/QT/ccvWriter/build/mingw-debug/appccvWriter_autogen/include/../QIZWBHDY3N/moc_FfmpegCaptureBase.cpp.json
+D:/QT/ccvWriter/build/mingw-debug/appccvWriter_autogen/include/../QIZWBHDY3N/moc_FfmpegVideoCapture.cpp.json
