@@ -12,6 +12,8 @@
 
 #include <memory>
 
+struct AVFrame;
+
 class EffectChain : public QObject {
     Q_OBJECT
 

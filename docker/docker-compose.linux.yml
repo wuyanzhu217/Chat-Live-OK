@@ -1,0 +1,66 @@
+# Ubuntu/Linux Docker Compose (requires Docker OSType=linux)
+#
+# Build image + compile:
+#   docker compose -f docker/docker-compose.linux.yml build
+#   docker compose -f docker/docker-compose.linux.yml run --rm build
+#
+# Run GUI app (host X11 + camera):
+#   xhost +local:docker
+#   docker compose -f docker/docker-compose.linux.yml run --rm app
+
+services:
+  build:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.ubuntu
+      target: build
+    image: chat-live-ok:ubuntu-build
+    working_dir: /work
+    environment:
+      QT_ROOT: /opt/Qt/6.8.3/gcc_64
+      CMAKE_PREFIX_PATH: /opt/Qt/6.8.3/gcc_64
+    volumes:
+      - ..:/work
+    command:
+      - bash
+      - -lc
+      - |
+        set -euo pipefail
+        export PATH=/opt/Qt/6.8.3/gcc_64/bin:/usr/bin:$$PATH
+        export LD_LIBRARY_PATH=/opt/Qt/6.8.3/gcc_64/lib
+        cmake -S /work -B /work/build/linux-docker -G Ninja \
+          -DCMAKE_BUILD_TYPE=$${CCV_BUILD_TYPE:-Release} \
+          -DCMAKE_PREFIX_PATH=/opt/Qt/6.8.3/gcc_64
+        cmake --build /work/build/linux-docker
+        echo "Build OK: /work/build/linux-docker/appccvWriter"
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.ubuntu
+      target: runtime
+    image: chat-live-ok:ubuntu
+    working_dir: /opt/chat-live-ok
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+      QT_QPA_PLATFORM: xcb
+      QT_ROOT: /opt/Qt/6.8.3/gcc_64
+      LD_LIBRARY_PATH: /opt/Qt/6.8.3/gcc_64/lib
+      QML2_IMPORT_PATH: /opt/Qt/6.8.3/gcc_64/qml
+      QT_PLUGIN_PATH: /opt/Qt/6.8.3/gcc_64/plugins
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    devices:
+      - /dev/video0:/dev/video0
+    stdin_open: true
+    tty: true
+    command: ["./appccvWriter"]
+
+  app-offscreen:
+    image: chat-live-ok:ubuntu
+    working_dir: /opt/chat-live-ok
+    environment:
+      QT_QPA_PLATFORM: offscreen
+    profiles:
+      - smoke
+    command: ["./appccvWriter"]

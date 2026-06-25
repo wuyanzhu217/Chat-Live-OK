@@ -1,0 +1,36 @@
+# escape=`
+# Self-contained CI image with Qt 6.9.1 MinGW installed via aqtinstall.
+# Build: docker build -f docker/Dockerfile.ci -t chat-live-ok:ci .
+# Note: first build downloads Qt (~2GB+) and takes a long time.
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+SHELL ["powershell", "-Command", "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue';"]
+
+LABEL org.opencontainers.image.title="chat-live-ok-ci"
+LABEL org.opencontainers.image.description="Full Qt 6.9.1 MinGW CI build env for ccvWriter"
+
+RUN Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe' -OutFile C:\python.exe ; `
+    Start-Process C:\python.exe -ArgumentList '/quiet InstallAllUsers=1 PrependPath=1 Include_test=0' -Wait ; `
+    Remove-Item C:\python.exe
+
+RUN python -m pip install --no-cache-dir aqtinstall==3.2.1
+
+RUN aqt install-qt windows desktop 6.9.1 win64_mingw -O C:\Qt -m qtquick qtshadertools
+
+RUN Invoke-WebRequest -Uri 'https://github.com/Kitware/CMake/releases/download/v3.30.5/cmake-3.30.5-windows-x86_64.zip' -OutFile C:\cmake.zip ; `
+    Expand-Archive C:\cmake.zip -DestinationPath C:\ ; `
+    Rename-Item C:\cmake-3.30.5-windows-x86_64 C:\CMake ; `
+    Remove-Item C:\cmake.zip
+
+RUN Invoke-WebRequest -Uri 'https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip' -OutFile C:\ninja.zip ; `
+    Expand-Archive C:\ninja.zip -DestinationPath C:\Ninja ; `
+    Remove-Item C:\ninja.zip
+
+ENV QT_ROOT=C:\Qt\6.9.1\mingw_64
+ENV MINGW_ROOT=C:\Qt\Tools\mingw1310_64
+ENV QTDIR=C:\Qt\6.9.1\mingw_64
+ENV PATH=C:\Ninja;C:\CMake\bin;%MINGW_ROOT%\bin;%QT_ROOT%\bin;%PATH%
+
+WORKDIR C:/work
+
+CMD ["powershell", "-NoProfile", "-Command", "cmake --version; g++ --version; qmake -v"]

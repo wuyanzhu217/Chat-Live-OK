@@ -1,0 +1,163 @@
+# Ubuntu multi-stage image: build + runtime for appccvWriter (Qt Quick + FFmpeg v4l2)
+#
+# Build:
+#   docker build -f docker/Dockerfile.ubuntu -t chat-live-ok:ubuntu .
+#
+# Run (GUI + camera on Linux host):
+#   xhost +local:docker
+#   docker run --rm -it \
+#     -e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix \
+#     --device /dev/video0 \
+#     chat-live-ok:ubuntu
+
+ARG UBUNTU_VERSION=24.04
+ARG QT_VERSION=6.8.3
+ARG QT_PATH=/opt/Qt/${QT_VERSION}/gcc_64
+
+# =============================================================================
+# Build stage
+# =============================================================================
+FROM ubuntu:${UBUNTU_VERSION} AS build
+
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+ARG QT_VERSION
+ARG QT_PATH
+ENV DEBIAN_FRONTEND=noninteractive
+ENV QT_PATH=${QT_PATH}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    cmake \
+    curl \
+    git \
+    ninja-build \
+    patchelf \
+    pkg-config \
+    python3 \
+    python3-pip \
+    python3-venv \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavfilter-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libswscale-dev \
+    libgl1-mesa-dev \
+    libglib2.0-dev \
+    libdbus-1-dev \
+    libfontconfig1-dev \
+    libfreetype6-dev \
+    libx11-dev \
+    libx11-xcb-dev \
+    libxcb1-dev \
+    libxcb-cursor-dev \
+    libxcb-glx0-dev \
+    libxcb-icccm4-dev \
+    libxcb-image0-dev \
+    libxcb-keysyms1-dev \
+    libxcb-randr0-dev \
+    libxcb-render-util0-dev \
+    libxcb-render0-dev \
+    libxcb-shape0-dev \
+    libxcb-shm0-dev \
+    libxcb-sync-dev \
+    libxcb-util-dev \
+    libxcb-xfixes0-dev \
+    libxcb-xinerama0-dev \
+    libxcb-xkb-dev \
+    libxext-dev \
+    libxfixes-dev \
+    libxi-dev \
+    libxkbcommon-x11-dev \
+    libxrender-dev \
+    libv4l-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --no-cache-dir --break-system-packages aqtinstall==3.2.1 \
+    && aqt install-qt linux desktop ${QT_VERSION} linux_gcc_64 -O /opt/Qt \
+        -m qtshadertools \
+    && rm -rf /root/.cache
+
+WORKDIR /work
+COPY . /work
+
+ENV QT_ROOT=${QT_PATH}
+ENV PATH=${QT_PATH}/bin:/usr/bin:${PATH}
+ENV LD_LIBRARY_PATH=${QT_PATH}/lib
+ENV QML2_IMPORT_PATH=${QT_PATH}/qml
+ENV QT_PLUGIN_PATH=${QT_PATH}/plugins
+
+RUN cmake -S /work -B /work/build/linux-docker -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_PREFIX_PATH=${QT_PATH} \
+    && cmake --build /work/build/linux-docker
+
+# =============================================================================
+# Runtime stage
+# =============================================================================
+FROM ubuntu:${UBUNTU_VERSION} AS runtime
+
+ARG QT_VERSION
+ARG QT_PATH
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV QT_PATH=${QT_PATH}
+ENV QT_ROOT=${QT_PATH}
+ENV LD_LIBRARY_PATH=${QT_PATH}/lib
+ENV QML2_IMPORT_PATH=${QT_PATH}/qml
+ENV QT_PLUGIN_PATH=${QT_PATH}/plugins
+ENV PATH=${QT_PATH}/bin:/usr/bin:${PATH}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libavcodec60 \
+    libavdevice60 \
+    libavfilter9 \
+    libavformat60 \
+    libavutil58 \
+    libswresample4 \
+    libswscale7 \
+    libgl1 \
+    libopengl0 \
+    libegl1 \
+    libglib2.0-0 \
+    libdbus-1-3 \
+    libfontconfig1 \
+    libfreetype6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcb-cursor0 \
+    libxcb-glx0 \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-randr0 \
+    libxcb-render-util0 \
+    libxcb-render0 \
+    libxcb-shape0 \
+    libxcb-shm0 \
+    libxcb-sync1 \
+    libxcb-util1 \
+    libxcb-xfixes0 \
+    libxcb-xinerama0 \
+    libxcb-xkb1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxkbcommon-x11-0 \
+    libxrender1 \
+    libv4l-0 \
+    libpulse0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build ${QT_PATH} ${QT_PATH}
+COPY --from=build /work/build/linux-docker /opt/chat-live-ok
+
+WORKDIR /opt/chat-live-ok
+CMD ["./appccvWriter"]

@@ -1,0 +1,69 @@
+# Windows containers only. Switch Docker Desktop to "Windows containers" before use.
+#
+# First time:
+#   docker compose -f docker/docker-compose.yml build
+#
+# Build project (mount host Qt + source):
+#   set HOST_QT_PATH=E:\QT
+#   docker compose -f docker/docker-compose.yml run --rm build
+#
+# Run on host after build:
+#   .\scripts\run.ps1 -BuildDir build\docker-debug
+
+services:
+  build:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.build
+    image: chat-live-ok:build
+    working_dir: C:/work
+    environment:
+      QT_ROOT: C:/Qt/6.9.1/mingw_64
+      MINGW_ROOT: C:/Qt/Tools/mingw1310_64
+      QTDIR: C:/Qt/6.9.1/mingw_64
+      CCV_BUILD_DIR: build/docker-debug
+      CCV_BUILD_TYPE: Debug
+    volumes:
+      - ${HOST_QT_PATH:-E:/QT}:C:/Qt:ro
+      - ..:C:/work
+    command:
+      - powershell
+      - -NoProfile
+      - -Command
+      - |
+        $ErrorActionPreference = 'Stop'
+        $env:PATH = 'C:/Ninja;C:/CMake/bin;' + $env:MINGW_ROOT + '/bin;' + $env:QT_ROOT + '/bin;' + $env:PATH
+        $buildDir = if ($env:CCV_BUILD_DIR) { $env:CCV_BUILD_DIR } else { 'build/docker-debug' }
+        $buildType = if ($env:CCV_BUILD_TYPE) { $env:CCV_BUILD_TYPE } else { 'Debug' }
+        cmake -S C:/work -B C:/work/$buildDir -G Ninja -DCMAKE_BUILD_TYPE=$buildType
+        cmake --build C:/work/$buildDir
+        & "$env:QT_ROOT/bin/windeployqt.exe" "C:/work/$buildDir/appccvWriter.exe" --no-translations
+        Write-Host "Build OK: C:/work/$buildDir/appccvWriter.exe"
+
+  ci-build:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.ci
+    image: chat-live-ok:ci
+    working_dir: C:/work
+    environment:
+      QT_ROOT: C:/Qt/6.9.1/mingw_64
+      MINGW_ROOT: C:/Qt/Tools/mingw1310_64
+      CCV_BUILD_DIR: build/ci
+      CCV_BUILD_TYPE: Release
+    volumes:
+      - ..:C:/work
+    profiles:
+      - ci
+    command:
+      - powershell
+      - -NoProfile
+      - -Command
+      - |
+        $ErrorActionPreference = 'Stop'
+        $env:PATH = 'C:/Ninja;C:/CMake/bin;' + $env:MINGW_ROOT + '/bin;' + $env:QT_ROOT + '/bin;' + $env:PATH
+        $buildDir = if ($env:CCV_BUILD_DIR) { $env:CCV_BUILD_DIR } else { 'build/ci' }
+        $buildType = if ($env:CCV_BUILD_TYPE) { $env:CCV_BUILD_TYPE } else { 'Release' }
+        cmake -S C:/work -B C:/work/$buildDir -G Ninja -DCMAKE_BUILD_TYPE=$buildType
+        cmake --build C:/work/$buildDir
+        & "$env:QT_ROOT/bin/windeployqt.exe" "C:/work/$buildDir/appccvWriter.exe" --no-translations

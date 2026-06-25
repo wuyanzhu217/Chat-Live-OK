@@ -1,4 +1,5 @@
 #include "FfmpegCaptureBase.h"
+#include "FfmpegPlatformCapture.h"
 
 extern "C" {
 #include <libavdevice/avdevice.h>
@@ -65,11 +66,22 @@ bool FfmpegCaptureBase::open(const CaptureConfig &config)
         return false;
     }   
 
-    //找到dshow输入格式
-    const AVInputFormat *inputFormat = av_find_input_format("dshow");
+    avdevice_register_all();
+
+    AVDictionary *options = nullptr;
+    if (!configureOptions(&options)) {
+        av_dict_free(&options);
+        reportError(QStringLiteral("configureOptions failed"));
+        return false;
+    }
+
+    // 按平台选择 FFmpeg 采集后端（Windows: dshow, Linux: v4l2/pulse）
+    const AVInputFormat *inputFormat =
+        av_find_input_format(FfmpegPlatformCapture::inputFormatFor(mediaType()));
     if (!inputFormat) {
         av_dict_free(&options);
-        reportError(QStringLiteral("dshow input format not found"));
+        reportError(QStringLiteral("Capture input format not found: %1")
+                        .arg(QString::fromUtf8(FfmpegPlatformCapture::inputFormatFor(mediaType()))));
         return false;
     }
 

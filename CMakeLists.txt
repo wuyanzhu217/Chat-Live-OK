@@ -1,10 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
 
 # =============================================================================
-# 本地开发环境（Windows + Qt 6.9.1 MinGW）
-# 可通过环境变量覆盖：
-#   QT_ROOT      — Qt 安装目录，例如 E:/QT/6.9.1/mingw_64
-#   MINGW_ROOT   — MinGW 工具链，例如 E:/QT/Tools/mingw1310_64
+# Windows: Qt 6.9.1 MinGW + bundled FFmpeg (lib/*.dll.a)
+# Linux:   system FFmpeg (pkg-config) + Qt via CMAKE_PREFIX_PATH / aqtinstall
+# Env:
+#   QT_ROOT / QTDIR / CMAKE_PREFIX_PATH — Qt install prefix
+#   MINGW_ROOT — MinGW on Windows
 # =============================================================================
 if(WIN32)
     if(DEFINED ENV{QT_ROOT})
@@ -35,16 +36,21 @@ if(WIN32)
         set(CMAKE_C_COMPILER "${CCV_MINGW_ROOT}/bin/gcc.exe"
             CACHE FILEPATH "MinGW gcc" FORCE)
     endif()
+elseif(UNIX AND NOT APPLE)
+    if(DEFINED ENV{QT_ROOT})
+        list(PREPEND CMAKE_PREFIX_PATH "$ENV{QT_ROOT}")
+    elseif(DEFINED ENV{QTDIR})
+        list(PREPEND CMAKE_PREFIX_PATH "$ENV{QTDIR}")
+    endif()
 endif()
 
 project(ccvWriter VERSION 0.1 LANGUAGES CXX)
 
-# 禁止在源码目录内构建（避免 cmake . 污染项目根目录）
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
     message(FATAL_ERROR
         "Do not build inside the source tree.\n"
-        "  cmake -S \"${CMAKE_SOURCE_DIR}\" -B \"${CMAKE_SOURCE_DIR}/build/mingw-debug\" -G Ninja\n"
-        "  cmake --build \"${CMAKE_SOURCE_DIR}/build/mingw-debug\"")
+        "  Windows: cmake -S . -B build/mingw-debug -G Ninja\n"
+        "  Linux:   cmake -S . -B build/linux-debug -G Ninja")
 endif()
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -61,6 +67,7 @@ find_package(Qt6 REQUIRED COMPONENTS Quick Core)
 qt_standard_project_setup(REQUIRES 6.8)
 
 set(STREAMING_CAPTURE_SOURCES
+    streaming/capture/FfmpegPlatformCapture.cpp
     streaming/capture/FfmpegDeviceEnumerator.cpp
     streaming/capture/FfmpegCaptureBase.cpp
     streaming/capture/FfmpegVideoCapture.cpp
@@ -80,10 +87,28 @@ set(STREAMING_EFFECTS_SOURCES
     streaming/effects/plugins/SharpenEffect.cpp
 )
 
+set(STREAMING_RENDER_SOURCES
+    streaming/render/FfmpegVideoRendererBase.cpp
+    streaming/render/LocalVideoRenderer.cpp
+    streaming/render/RemoteVideoRenderer.cpp
+)
+
+set(STREAMING_PIPELINE_SOURCES
+    streaming/pipeline/PublishPipeline.cpp
+    streaming/pipeline/PlayPipeline.cpp
+)
+
+set(STREAMING_CALL_SOURCES
+    streaming/call/CallSessionController.cpp
+)
+
 qt_add_executable(appccvWriter
     main.cpp
     ${STREAMING_CAPTURE_SOURCES}
     ${STREAMING_EFFECTS_SOURCES}
+    ${STREAMING_RENDER_SOURCES}
+    ${STREAMING_PIPELINE_SOURCES}
+    ${STREAMING_CALL_SOURCES}
 )
 
 qt_add_qml_module(appccvWriter
@@ -91,14 +116,19 @@ qt_add_qml_module(appccvWriter
     VERSION 1.0
     QML_FILES
         Main.qml
+        qml/VideoPanel.qml
     SOURCES
         media/muxerh264toMp4/ccvideowriter.h
         media/muxerh264toMp4/ccvideowriter.cpp
+        streaming/capture/FfmpegPlatformCapture.h
         streaming/capture/FfmpegDeviceEnumerator.h
         streaming/capture/FfmpegCaptureBase.h
         streaming/capture/FfmpegVideoCapture.h
         streaming/capture/FfmpegAudioCapture.h
+        streaming/core/AvFramePtr.h
         streaming/core/FramePool.h
+        streaming/pipeline/PublishPipeline.h
+        streaming/pipeline/PlayPipeline.h
         streaming/effects/IVideoEffect.h
         streaming/effects/EffectContext.h
         streaming/effects/EffectChain.h
@@ -112,22 +142,23 @@ qt_add_qml_module(appccvWriter
         streaming/effects/plugins/SharpenEffect.h
 )
 
-set_target_properties(appccvWriter PROPERTIES
-    MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
-    MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
-    MACOSX_BUNDLE TRUE
-    WIN32_EXECUTABLE TRUE
-)
+if(APPLE)
+    set_target_properties(appccvWriter PROPERTIES
+        MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
+        MACOSX_BUNDLE TRUE
+    )
+elseif(WIN32)
+    set_target_properties(appccvWriter PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+
+target_include_directories(appccvWriter PRIVATE "${CMAKE_SOURCE_DIR}")
 
 set(FFMPEG_LIB_DIR "${CMAKE_SOURCE_DIR}/lib")
 set(FFMPEG_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/include")
 
-target_include_directories(appccvWriter PRIVATE
-    "${FFMPEG_INCLUDE_DIR}"
-    "${CMAKE_SOURCE_DIR}"
-)
-
-if(MINGW)
+if(WIN32 OR MINGW)
+    target_include_directories(appccvWriter PRIVATE "${FFMPEG_INCLUDE_DIR}")
     set(FFMPEG_LIBS
         "${FFMPEG_LIB_DIR}/libavdevice.dll.a"
         "${FFMPEG_LIB_DIR}/libavfilter.dll.a"
@@ -137,7 +168,21 @@ if(MINGW)
         "${FFMPEG_LIB_DIR}/libswscale.dll.a"
         "${FFMPEG_LIB_DIR}/libswresample.dll.a"
     )
+elseif(UNIX AND NOT APPLE)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
+        libavdevice
+        libavfilter
+        libavformat
+        libavcodec
+        libavutil
+        libswscale
+        libswresample
+    )
+    target_include_directories(appccvWriter PRIVATE ${FFMPEG_INCLUDE_DIRS})
+    set(FFMPEG_LIBS PkgConfig::FFMPEG)
 else()
+    target_include_directories(appccvWriter PRIVATE "${FFMPEG_INCLUDE_DIR}")
     find_library(AVDEVICE_LIB avdevice PATHS "${FFMPEG_LIB_DIR}" NO_DEFAULT_PATH REQUIRED)
     find_library(AVFILTER_LIB avfilter  PATHS "${FFMPEG_LIB_DIR}" NO_DEFAULT_PATH REQUIRED)
     find_library(AVFORMAT_LIB avformat PATHS "${FFMPEG_LIB_DIR}" NO_DEFAULT_PATH REQUIRED)
@@ -162,15 +207,15 @@ if(WIN32)
     target_link_libraries(appccvWriter PRIVATE
         bcrypt secur32 ole32 strmiids uuid oleaut32
     )
-endif()
 
-file(GLOB FFMPEG_RUNTIME_DLLS CONFIGURE_DEPENDS "${FFMPEG_LIB_DIR}/*-*.dll")
-add_custom_command(TARGET appccvWriter POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${FFMPEG_RUNTIME_DLLS}
-        $<TARGET_FILE_DIR:appccvWriter>
-    COMMENT "Copy FFmpeg DLLs next to appccvWriter.exe"
-)
+    file(GLOB FFMPEG_RUNTIME_DLLS CONFIGURE_DEPENDS "${FFMPEG_LIB_DIR}/*-*.dll")
+    add_custom_command(TARGET appccvWriter POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${FFMPEG_RUNTIME_DLLS}
+            $<TARGET_FILE_DIR:appccvWriter>
+        COMMENT "Copy FFmpeg DLLs next to appccvWriter.exe"
+    )
+endif()
 
 include(GNUInstallDirs)
 install(TARGETS appccvWriter
@@ -179,6 +224,5 @@ install(TARGETS appccvWriter
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-# 配置完成后打印环境信息
 message(STATUS "ccvWriter Qt prefix: ${CMAKE_PREFIX_PATH}")
 message(STATUS "ccvWriter C++ compiler: ${CMAKE_CXX_COMPILER}")

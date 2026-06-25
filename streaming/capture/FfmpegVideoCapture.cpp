@@ -42,7 +42,9 @@ bool FfmpegVideoCapture::configureOptions(AVDictionary **options)
     const QString size = QStringLiteral("%1x%2").arg(m_config.width).arg(m_config.height);
     av_dict_set(options, "video_size", size.toUtf8().constData(), 0);
     av_dict_set(options, "framerate", QByteArray::number(m_config.fps).constData(), 0);
+#if defined(Q_OS_WIN)
     av_dict_set(options, "rtbufsize", "100M", 0);
+#endif
     return true;
 }
 

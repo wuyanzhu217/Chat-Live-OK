@@ -11,7 +11,6 @@
 
 class FfmpegVideoRendererBase : public QQuickItem, public IVideoFrameSink {
     Q_OBJECT
-    QML_ELEMENT
 
     Q_PROPERTY(bool hasFrame READ hasFrame NOTIFY frameUpdated)
     Q_PROPERTY(QString placeholderText READ placeholderText WRITE setPlaceholderText NOTIFY placeholderTextChanged)
@@ -24,6 +23,8 @@ public:
     void setPlaceholderText(const QString &text);
 
     void submitFrame(AvFramePtr frame, qint64 ptsMs) override;
+
+    Q_INVOKABLE void clearFrame();
 
 signals:
     void frameUpdated();

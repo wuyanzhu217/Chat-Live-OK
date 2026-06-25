@@ -1,0 +1,21 @@
+# Build outputs
+build/
+**/build/
+
+# IDE / tooling
+.idea/
+.vscode/
+*.user
+compile_commands.json
+
+# Git
+.git/
+
+# Windows artifacts inside repo
+*.exe
+*.dll
+*.obj
+*.pdb
+
+# Docker local overrides
+.env

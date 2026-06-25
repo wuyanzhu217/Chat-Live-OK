@@ -5,6 +5,7 @@
 
 #include <QStringList>
 
+struct AVFrame;
 struct AVFilterContext;
 struct AVFilterGraph;
 

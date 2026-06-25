@@ -1,6 +1,8 @@
 #ifndef STREAMING_CORE_FRAMEPOOL_H
 #define STREAMING_CORE_FRAMEPOOL_H
 
+#include <QVector>
+
 extern "C" {
 #include <libavutil/pixfmt.h>
 }

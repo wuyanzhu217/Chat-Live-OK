@@ -149,7 +149,8 @@ bool FfmpegFilterGraph::process(const AVFrame *in, AVFrame *out)
     if (!isBuilt() || !in || !out)
         return false;
 
-    if (av_buffersrc_add_frame_flags(m_bufferSrc, in, AV_BUFFERSRC_FLAG_KEEP_REF) < 0)
+    // KEEP_REF does not modify the source frame; FFmpeg API still takes non-const AVFrame*.
+    if (av_buffersrc_add_frame_flags(m_bufferSrc, const_cast<AVFrame *>(in), AV_BUFFERSRC_FLAG_KEEP_REF) < 0)
         return false;
 
     return av_buffersink_get_frame(m_bufferSink, out) >= 0;
