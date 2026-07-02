@@ -1,0 +1,35 @@
+# Build
+build/
+**/build/
+*.o
+*.a
+compile_commands.json
+
+# IDE
+.idea/
+.vscode/
+*.user
+CMakeUserPresets.json
+
+# Node
+node_modules/
+client/web/dist/
+*.local
+
+# Env & secrets
+.env
+server/deploy/.env
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes (local data)
+server/deploy/data/
+
+# Qt
+*.autosave
+moc_*.cpp
+*_autogen/

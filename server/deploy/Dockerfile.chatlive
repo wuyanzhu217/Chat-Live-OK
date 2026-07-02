@@ -1,0 +1,9 @@
+# Dockerfile.chatlive (placeholder)
+
+# FROM ubuntu:24.04
+# RUN apt-get update && apt-get install -y ...
+# COPY build/server/chatlive /usr/local/bin/chatlive
+# EXPOSE 8088 8089
+# CMD ["chatlive"]
+
+# Build after implementing server/chatlive/

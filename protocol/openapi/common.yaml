@@ -1,0 +1,70 @@
+openapi: 3.1.0
+info:
+  title: Chat-Live-OK API
+  version: 1.0.0
+  description: |
+    V1 REST API. Full spec in docs/api/.
+    This file is a scaffold — expand per module under protocol/openapi/.
+servers:
+  - url: http://127.0.0.1:8888/v1
+    description: Local dev (nginx → chatlive, when wired)
+  - url: https://api.example.com/v1
+    description: Production
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ApiResponse:
+      type: object
+      required: [code, message, request_id]
+      properties:
+        code:
+          type: integer
+          example: 0
+        message:
+          type: string
+        data:
+          nullable: true
+        request_id:
+          type: string
+
+    PushUrls:
+      type: object
+      properties:
+        whip:
+          type: string
+          format: uri
+        rtmp:
+          type: string
+
+    PlayUrls:
+      type: object
+      properties:
+        hls:
+          type: string
+          format: uri
+          nullable: true
+        flv:
+          type: string
+          nullable: true
+        whep:
+          type: string
+          nullable: true
+        ll_hls:
+          type: string
+          nullable: true
+
+paths:
+  /health:
+    get:
+      summary: Health check (implement on chatlive-server)
+      responses:
+        '200':
+          description: OK
+
+# Module paths — see docs/api/REST-*.md for full definitions

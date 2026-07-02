@@ -1,0 +1,180 @@
+# Chat-Live-OK development stack
+# Usage (from repo root):
+#   cp server/deploy/.env.example server/deploy/.env
+#   make dev-up              # Postgres, Redis, MinIO, SRS, Keycloak, coturn, nginx
+#
+# Ports:
+#   5432  PostgreSQL
+#   6379  Redis
+#   9000  MinIO API   9001 Console
+#   1935  SRS RTMP
+#   1985  SRS HTTP API (WHIP/WHEP signaling)
+#   8080  SRS HTTP Server (HLS)
+#   8000  SRS WebRTC UDP
+#   3478  coturn
+#   8081  Keycloak (OIDC / admin)
+#   8888  nginx gateway (API/HLS/WHIP/auth proxy for local dev)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: chatlive-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-chatlive}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chatlive_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-chatlive}
+      KEYCLOAK_DB_USER: ${KEYCLOAK_DB_USER:-keycloak}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/initdb.d/000-keycloak-db.sh:/docker-entrypoint-initdb.d/000-keycloak-db.sh:ro
+      - ../migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chatlive}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: chatlive-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: chatlive-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-chatlive}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-chatlive_dev_minio}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  # Dev-only: accepts all SRS publish hooks until chatlive-server is implemented.
+  # Replace hook URL with http://chatlive:8088 when real service is ready.
+  mock-auth:
+    image: nginx:alpine
+    container_name: chatlive-mock-auth
+    restart: unless-stopped
+    volumes:
+      - ./mock-auth/default.conf:/etc/nginx/conf.d/default.conf:ro
+    expose:
+      - "8088"
+
+  srs:
+    image: ossrs/srs:6
+    container_name: chatlive-srs
+    restart: unless-stopped
+    environment:
+      CANDIDATE: ${SRS_CANDIDATE:-127.0.0.1}
+    ports:
+      - "1935:1935"       # RTMP
+      - "1985:1985"       # HTTP API (WHIP/WHEP)
+      - "8080:8080"       # HTTP Server (HLS / HTTP-FLV)
+      - "8000:8000/udp"   # WebRTC media
+    volumes:
+      - ./srs/srs.conf:/usr/local/srs/conf/chatlive.conf:ro
+      - srs_data:/usr/local/srs/objs
+    command: ["./objs/srs", "-c", "conf/chatlive.conf"]
+    depends_on:
+      mock-auth:
+        condition: service_started
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: chatlive-coturn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+
+  nginx:
+    image: nginx:alpine
+    container_name: chatlive-nginx
+    restart: unless-stopped
+    ports:
+      - "8888:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - srs
+      # - chatlive   # uncomment when chatlive-server is added
+
+  # chatlive-server (C++ Drogon) — placeholder for P1+ implementation
+  # chatlive:
+  #   build:
+  #     context: ../..
+  #     dockerfile: server/deploy/Dockerfile.chatlive
+  #   container_name: chatlive-server
+  #   restart: unless-stopped
+  #   environment:
+  #     DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  #     REDIS_URL: redis://redis:6379
+  #     MINIO_ENDPOINT: http://minio:9000
+  #     KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER}
+  #     KEYCLOAK_JWKS_URI: ${KEYCLOAK_JWKS_URI}
+  #     SRS_HOOK_SECRET: dev
+  #   expose:
+  #     - "8088"
+  #     - "8089"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: chatlive-keycloak
+    restart: unless-stopped
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER:-keycloak}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak_dev}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-localhost}
+      KC_HOSTNAME_PORT: ${KEYCLOAK_HTTP_PORT:-8081}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_dev}
+    ports:
+      - "${KEYCLOAK_HTTP_PORT:-8081}:8080"
+    volumes:
+      - ./keycloak/import:/opt/keycloak/data/import:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  srs_data:

@@ -1,0 +1,52 @@
+asyncapi: 3.0.0
+info:
+  title: Chat-Live-OK Realtime
+  version: 1.0.0
+  description: |
+    WebSocket protocol scaffold. Full spec: docs/api/WS-Realtime-Protocol.md
+
+servers:
+  development:
+    host: 127.0.0.1:8888
+    pathname: /v1/ws
+    protocol: ws
+
+channels:
+  realtime:
+    address: /v1/ws
+    messages:
+      message.new:
+        payload:
+          type: object
+          properties:
+            event:
+              const: message.new
+            data:
+              type: object
+      webrtc.offer:
+        payload:
+          type: object
+          properties:
+            event:
+              const: webrtc.offer
+            data:
+              type: object
+              properties:
+                call_id:
+                  type: string
+                from_user_id:
+                  type: string
+                to_user_id:
+                  type: string
+                sdp:
+                  type: string
+      live.danmaku:
+        payload:
+          type: object
+          properties:
+            event:
+              const: live.danmaku
+            data:
+              type: object
+
+# Expand with all events from docs/api/WS-Realtime-Protocol.md
