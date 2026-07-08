@@ -1,9 +1,46 @@
-# Dockerfile.chatlive (placeholder)
+# Multi-stage build for chatlive-server (Drogon + jwt-cpp)
+# Build context: repository root
+#   docker build -f server/deploy/Dockerfile.chatlive .
 
-# FROM ubuntu:24.04
-# RUN apt-get update && apt-get install -y ...
-# COPY build/server/chatlive /usr/local/bin/chatlive
-# EXPOSE 8088 8089
-# CMD ["chatlive"]
+FROM ubuntu:24.04 AS drogon-builder
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates git cmake g++ make \
+    libjsoncpp-dev libssl-dev zlib1g-dev libbrotli-dev \
+    libpq-dev uuid-dev libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Build after implementing server/chatlive/
+ARG DROGON_TAG=v1.9.13
+RUN git clone --recursive --depth 1 --branch "${DROGON_TAG}" \
+    https://github.com/drogonframework/drogon.git /src/drogon
+
+WORKDIR /src/drogon/build
+RUN cmake .. \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DBUILD_EXAMPLES=OFF \
+    -DBUILD_CTL=OFF \
+    && make -j"$(nproc)" \
+    && make install
+
+FROM drogon-builder AS chatlive-builder
+WORKDIR /build
+COPY server/third_party/jwt-cpp /build/third_party/jwt-cpp
+COPY server/chatlive /build/chatlive
+
+WORKDIR /build/chatlive
+RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build build -j"$(nproc)"
+
+FROM ubuntu:24.04 AS runtime
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libjsoncpp25 libssl3 zlib1g libbrotli1 libpq5 libcurl4t64 libuuid1 \
+    libzstd1 libhiredis1.1.0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=chatlive-builder /build/chatlive/build/chatlive-server /usr/local/bin/chatlive-server
+
+EXPOSE 8088 8089
+CMD ["chatlive-server"]

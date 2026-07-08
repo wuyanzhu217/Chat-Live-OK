@@ -1,0 +1,27 @@
+# Git & IDE
+.git
+.cursor
+**/.vscode
+
+# Build artifacts
+server/chatlive/build
+server/third_party/drogon/build
+server/third_party/**/build
+
+# Large vendored sources not needed in image (Drogon built inside Dockerfile)
+server/third_party/drogon
+server/third_party/postgresql-*
+server/third_party/util-linux-*
+server/third_party/curl-*
+server/third_party/local
+
+# Client & docs (not needed for server image)
+ccvWriter
+web
+docs
+*.md
+!server/chatlive/README.md
+
+# Env & data
+server/deploy/.env
+**/*.log

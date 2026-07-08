@@ -7,10 +7,10 @@ namespace chatlive {
 class FriendController : public drogon::HttpController<FriendController> {
 public:
     METHOD_LIST_BEGIN
-    METHOD_ADD(FriendController::getFriends, "/v1/friends", drogon::Get);
-    METHOD_ADD(FriendController::sendFriendRequest, "/v1/friend-requests", drogon::Post);
-    METHOD_ADD(FriendController::listFriendRequests, "/v1/friend-requests", drogon::Get);
-    METHOD_ADD(FriendController::respondFriendRequest, "/v1/friend-requests/{id}/respond", drogon::Post);
+    ADD_METHOD_TO(FriendController::getFriends, "/v1/friends", drogon::Get, "JwtAuthFilter");
+    ADD_METHOD_TO(FriendController::sendFriendRequest, "/v1/friend-requests", drogon::Post, "JwtAuthFilter");
+    ADD_METHOD_TO(FriendController::listFriendRequests, "/v1/friend-requests", drogon::Get, "JwtAuthFilter");
+    ADD_METHOD_TO(FriendController::respondFriendRequest, "/v1/friend-requests/{id}/respond", drogon::Post, "JwtAuthFilter");
     METHOD_LIST_END
 
     void getFriends(const drogon::HttpRequestPtr& req,

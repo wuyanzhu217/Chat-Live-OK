@@ -7,6 +7,7 @@ EventType stringToEventType(const std::string& event) {
     if (event == "pong") return EventType::Pong;
     if (event == "presence.sync") return EventType::PresenceSync;
     if (event == "message.new") return EventType::MessageNew;
+    if (event == "message.read") return EventType::MessageRead;
     if (event == "typing.start") return EventType::TypingStart;
     if (event == "typing.stop") return EventType::TypingStop;
     if (event == "call.incoming") return EventType::CallIncoming;
@@ -24,6 +25,7 @@ std::string eventTypeToString(EventType type) {
         case EventType::Pong: return "pong";
         case EventType::PresenceSync: return "presence.sync";
         case EventType::MessageNew: return "message.new";
+        case EventType::MessageRead: return "message.read";
         case EventType::TypingStart: return "typing.start";
         case EventType::TypingStop: return "typing.stop";
         case EventType::CallIncoming: return "call.incoming";

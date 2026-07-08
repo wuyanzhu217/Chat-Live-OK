@@ -7,8 +7,8 @@ namespace chatlive {
 class MessageController : public drogon::HttpController<MessageController> {
 public:
     METHOD_LIST_BEGIN
-    METHOD_ADD(MessageController::listMessages, "/v1/conversations/{convId}/messages", drogon::Get);
-    METHOD_ADD(MessageController::sendMessage, "/v1/conversations/{convId}/messages", drogon::Post);
+    ADD_METHOD_TO(MessageController::listMessages, "/v1/conversations/{convId}/messages", drogon::Get, "JwtAuthFilter");
+    ADD_METHOD_TO(MessageController::sendMessage, "/v1/conversations/{convId}/messages", drogon::Post, "JwtAuthFilter");
     METHOD_LIST_END
 
     void listMessages(const drogon::HttpRequestPtr& req,

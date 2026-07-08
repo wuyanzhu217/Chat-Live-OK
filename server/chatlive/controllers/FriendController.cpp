@@ -1,35 +1,21 @@
 #include "FriendController.h"
-#include <drogon/HttpAppFramework.h>
+#include "../services/UserService.h"
+#include "../utils/ApiResponse.h"
+#include "../ws/WsHub.h"
+
 #include <drogon/drogon.h>
-#include <json/json.h>
 
 namespace chatlive {
-
-static drogon::HttpResponsePtr makeError(drogon::HttpStatusCode code, const std::string& msg) {
-    auto resp = drogon::HttpResponse::newHttpResponse();
-    resp->setStatusCode(code);
-    resp->setBody(msg);
-    return resp;
-}
 
 void FriendController::getFriends(const drogon::HttpRequestPtr& req,
                                   std::function<void(const drogon::HttpResponsePtr&)>&& callback)
 {
-    auto sub = req->attributes()->get<std::string>("user_sub");
-    auto dbClient = drogon::app().getDbClient();
+    const auto sub = req->attributes()->get<std::string>("user_sub");
+    const auto dbClient = drogon::app().getDbClient();
 
-    dbClient->execSqlAsync(
-        "SELECT id FROM users WHERE keycloak_sub = $1",
-        [callback, dbClient](const drogon::orm::Result& r) {
-            if (r.size() == 0) {
-                auto resp = drogon::HttpResponse::newHttpResponse();
-                resp->setStatusCode(drogon::k404NotFound);
-                resp->setBody("User not found");
-                callback(resp);
-                return;
-            }
-            std::string userId = r[0]["id"].as<std::string>();
-
+    UserService::getUserIdBySub(
+        dbClient, sub,
+        [callback, dbClient](const std::string& userId) {
             dbClient->execSqlAsync(
                 "SELECT u.id, u.username, u.nickname, u.avatar_url, f.created_at "
                 "FROM friendships f "
@@ -40,58 +26,53 @@ void FriendController::getFriends(const drogon::HttpRequestPtr& req,
                     Json::Value arr(Json::arrayValue);
                     for (const auto& row : r2) {
                         Json::Value item;
-                        item["id"] = row["id"].as<std::string>();
+                        const std::string friendId = row["id"].as<std::string>();
+                        item["user_id"] = friendId;
                         item["username"] = row["username"].as<std::string>();
                         item["nickname"] = row["nickname"].as<std::string>();
-                        item["avatar_url"] = row["avatar_url"].isNull() ? Json::Value::null : row["avatar_url"].as<std::string>();
+                        item["avatar_url"] = row["avatar_url"].isNull()
+                            ? Json::Value::null
+                            : row["avatar_url"].as<std::string>();
                         item["created_at"] = row["created_at"].as<std::string>();
+                        item["presence"] = WsHub::instance().isOnline(friendId) ? "online" : "offline";
                         arr.append(item);
                     }
-                    auto resp = drogon::HttpResponse::newHttpJsonResponse(arr);
-                    callback(resp);
+                    callback(ApiResponse::ok(ApiResponse::page(arr, "", false)));
                 },
                 [callback](const drogon::orm::DrogonDbException& e) {
-                    auto resp = drogon::HttpResponse::newHttpResponse();
-                    resp->setStatusCode(drogon::k500InternalServerError);
-                    resp->setBody(std::string("DB error: ") + e.base().what());
-                    callback(resp);
+                    callback(ApiResponse::err(ApiCode::Internal,
+                                            std::string("DB error: ") + e.base().what(),
+                                            drogon::k500InternalServerError));
                 },
                 userId);
         },
-        [callback](const drogon::orm::DrogonDbException& e) {
-            auto resp = drogon::HttpResponse::newHttpResponse();
-            resp->setStatusCode(drogon::k500InternalServerError);
-            resp->setBody(std::string("DB error: ") + e.base().what());
-            callback(resp);
-        },
-        sub);
+        [callback](const std::string& err) {
+            callback(ApiResponse::err(ApiCode::UserNotFound, err, drogon::k404NotFound));
+        });
 }
 
 void FriendController::sendFriendRequest(const drogon::HttpRequestPtr& req,
                                          std::function<void(const drogon::HttpResponsePtr&)>&& callback)
 {
-    auto sub = req->attributes()->get<std::string>("user_sub");
-    auto dbClient = drogon::app().getDbClient();
+    const auto sub = req->attributes()->get<std::string>("user_sub");
+    const auto dbClient = drogon::app().getDbClient();
 
-    auto json = req->jsonObject();
+    const auto json = req->jsonObject();
     if (!json || !(*json)["to_user_id"].isString()) {
-        callback(makeError(drogon::k400BadRequest, "Missing to_user_id"));
+        callback(ApiResponse::err(ApiCode::InvalidParam, "Missing to_user_id", drogon::k400BadRequest));
         return;
     }
-    std::string toUserId = (*json)["to_user_id"].asString();
-    std::string message = (*json)["message"].isString() ? (*json)["message"].asString() : "";
 
-    dbClient->execSqlAsync(
-        "SELECT id FROM users WHERE keycloak_sub = $1",
-        [callback, dbClient, toUserId, message, sub](const drogon::orm::Result& r) {
-            if (r.size() == 0) {
-                callback(makeError(drogon::k404NotFound, "User not found"));
-                return;
-            }
-            std::string fromUserId = r[0]["id"].as<std::string>();
+    const std::string toUserId = (*json)["to_user_id"].asString();
+    const std::string message = (*json)["message"].isString() ? (*json)["message"].asString() : "";
 
+    UserService::getUserIdBySub(
+        dbClient, sub,
+        [callback, dbClient, toUserId, message, sub](const std::string& fromUserId) {
             if (fromUserId == toUserId) {
-                callback(makeError(drogon::k400BadRequest, "Cannot send friend request to yourself"));
+                callback(ApiResponse::err(ApiCode::CannotFriendSelf,
+                                        "Cannot send friend request to yourself",
+                                        drogon::k400BadRequest));
                 return;
             }
 
@@ -99,56 +80,74 @@ void FriendController::sendFriendRequest(const drogon::HttpRequestPtr& req,
                 "INSERT INTO friend_requests (from_user_id, to_user_id, message) "
                 "VALUES ($1, $2, $3) "
                 "RETURNING id, status, created_at",
-                [callback](const drogon::orm::Result& r2) {
-                    if (r2.size() > 0) {
-                        auto row = r2[0];
-                        Json::Value json;
-                        json["id"] = row["id"].as<std::string>();
-                        json["status"] = row["status"].as<std::string>();
-                        json["created_at"] = row["created_at"].as<std::string>();
-                        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
-                        resp->setStatusCode(drogon::k201Created);
-                        callback(resp);
-                    } else {
-                        callback(makeError(drogon::k500InternalServerError, "Failed to create friend request"));
+                [callback, dbClient, fromUserId, toUserId, message](const drogon::orm::Result& r2) {
+                    if (r2.size() == 0) {
+                        callback(ApiResponse::err(ApiCode::Internal, "Failed to create friend request",
+                                                drogon::k500InternalServerError));
+                        return;
                     }
+
+                    const auto row = r2[0];
+                    const std::string requestId = row["id"].as<std::string>();
+
+                    auto respond = [callback, row, requestId](const Json::Value& fromUser,
+                                                              const std::string& toUserId,
+                                                              const std::string& message) {
+                        Json::Value data;
+                        data["id"] = requestId;
+                        data["status"] = row["status"].as<std::string>();
+                        data["created_at"] = row["created_at"].as<std::string>();
+                        callback(ApiResponse::ok(data, drogon::k201Created));
+
+                        if (!fromUser.isNull()) {
+                            Json::Value pushData;
+                            pushData["request_id"] = requestId;
+                            pushData["from_user"] = fromUser;
+                            pushData["message"] = message.empty() ? Json::Value::null : Json::Value(message);
+                            WsHub::instance().pushToUser(toUserId, "friend.request", pushData);
+                        }
+                    };
+
+                    UserService::getUserProfile(
+                        dbClient, fromUserId,
+                        [respond, toUserId, message](const Json::Value& fromUser) {
+                            respond(fromUser, toUserId, message);
+                        },
+                        [respond, toUserId, message](const std::string& err) {
+                            LOG_WARN << "[Friend] push friend.request profile load failed: " << err;
+                            respond(Json::Value::null, toUserId, message);
+                        });
                 },
                 [callback, sub](const drogon::orm::DrogonDbException& e) {
-                    std::string what = e.base().what();
+                    const std::string what = e.base().what();
                     LOG_ERROR << "[Friend] sendFriendRequest DB error user_sub=" << sub << " err=" << what;
-                    if (what.find("23505") != std::string::npos || what.find("unique constraint") != std::string::npos) {
-                        callback(makeError(drogon::k409Conflict, "Friend request already exists"));
+                    if (what.find("23505") != std::string::npos ||
+                        what.find("unique constraint") != std::string::npos) {
+                        callback(ApiResponse::err(ApiCode::FriendRequestExists,
+                                                "Friend request already exists",
+                                                drogon::k409Conflict));
                     } else {
-                        callback(makeError(drogon::k500InternalServerError, "DB error"));
+                        callback(ApiResponse::err(ApiCode::Internal, "DB error",
+                                                drogon::k500InternalServerError));
                     }
                 },
                 fromUserId, toUserId, message);
         },
-        [callback, sub](const drogon::orm::DrogonDbException& e) {
-            LOG_ERROR << "[Friend] sendFriendRequest lookup DB error user_sub=" << sub << " err=" << e.base().what();
-            callback(makeError(drogon::k500InternalServerError, "DB error"));
-        },
-        sub);
+        [callback, sub](const std::string& err) {
+            LOG_ERROR << "[Friend] sendFriendRequest lookup failed user_sub=" << sub << " err=" << err;
+            callback(ApiResponse::err(ApiCode::UserNotFound, err, drogon::k404NotFound));
+        });
 }
 
 void FriendController::listFriendRequests(const drogon::HttpRequestPtr& req,
                                           std::function<void(const drogon::HttpResponsePtr&)>&& callback)
 {
-    auto sub = req->attributes()->get<std::string>("user_sub");
-    auto dbClient = drogon::app().getDbClient();
+    const auto sub = req->attributes()->get<std::string>("user_sub");
+    const auto dbClient = drogon::app().getDbClient();
 
-    dbClient->execSqlAsync(
-        "SELECT id FROM users WHERE keycloak_sub = $1",
-        [callback, dbClient](const drogon::orm::Result& r) {
-            if (r.size() == 0) {
-                auto resp = drogon::HttpResponse::newHttpResponse();
-                resp->setStatusCode(drogon::k404NotFound);
-                resp->setBody("User not found");
-                callback(resp);
-                return;
-            }
-            std::string userId = r[0]["id"].as<std::string>();
-
+    UserService::getUserIdBySub(
+        dbClient, sub,
+        [callback, dbClient](const std::string& userId) {
             dbClient->execSqlAsync(
                 "SELECT fr.id, fr.from_user_id, fr.to_user_id, fr.message, fr.status, fr.created_at, "
                 "       u1.username AS from_username, u1.nickname AS from_nickname, "
@@ -174,126 +173,110 @@ void FriendController::listFriendRequests(const drogon::HttpRequestPtr& req,
                         item["to_user"]["nickname"] = row["to_nickname"].as<std::string>();
                         arr.append(item);
                     }
-                    auto resp = drogon::HttpResponse::newHttpJsonResponse(arr);
-                    callback(resp);
+                    callback(ApiResponse::ok(ApiResponse::page(arr, "", false)));
                 },
                 [callback](const drogon::orm::DrogonDbException& e) {
-                    auto resp = drogon::HttpResponse::newHttpResponse();
-                    resp->setStatusCode(drogon::k500InternalServerError);
-                    resp->setBody(std::string("DB error: ") + e.base().what());
-                    callback(resp);
+                    callback(ApiResponse::err(ApiCode::Internal,
+                                            std::string("DB error: ") + e.base().what(),
+                                            drogon::k500InternalServerError));
                 },
                 userId);
         },
-        [callback](const drogon::orm::DrogonDbException& e) {
-            auto resp = drogon::HttpResponse::newHttpResponse();
-            resp->setStatusCode(drogon::k500InternalServerError);
-            resp->setBody(std::string("DB error: ") + e.base().what());
-            callback(resp);
-        },
-        sub);
+        [callback](const std::string& err) {
+            callback(ApiResponse::err(ApiCode::UserNotFound, err, drogon::k404NotFound));
+        });
 }
 
 void FriendController::respondFriendRequest(const drogon::HttpRequestPtr& req,
                                             std::function<void(const drogon::HttpResponsePtr&)>&& callback,
                                             const std::string& requestId)
 {
-    auto sub = req->attributes()->get<std::string>("user_sub");
-    auto dbClient = drogon::app().getDbClient();
+    const auto sub = req->attributes()->get<std::string>("user_sub");
+    const auto dbClient = drogon::app().getDbClient();
 
-    auto json = req->jsonObject();
+    const auto json = req->jsonObject();
     if (!json || !(*json)["action"].isString()) {
-        auto resp = drogon::HttpResponse::newHttpResponse();
-        resp->setStatusCode(drogon::k400BadRequest);
-        resp->setBody("Missing action (accept/reject)");
-        callback(resp);
+        callback(ApiResponse::err(ApiCode::InvalidParam, "Missing action (accept/reject)",
+                                drogon::k400BadRequest));
         return;
     }
-    std::string action = (*json)["action"].asString();
+
+    const std::string action = (*json)["action"].asString();
     if (action != "accept" && action != "reject") {
-        auto resp = drogon::HttpResponse::newHttpResponse();
-        resp->setStatusCode(drogon::k400BadRequest);
-        resp->setBody("Invalid action");
-        callback(resp);
+        callback(ApiResponse::err(ApiCode::InvalidParam, "Invalid action", drogon::k400BadRequest));
         return;
     }
 
-    dbClient->execSqlAsync(
-        "SELECT id FROM users WHERE keycloak_sub = $1",
-        [callback, dbClient, requestId, action](const drogon::orm::Result& r) {
-            if (r.size() == 0) {
-                auto resp = drogon::HttpResponse::newHttpResponse();
-                resp->setStatusCode(drogon::k404NotFound);
-                resp->setBody("User not found");
-                callback(resp);
-                return;
-            }
-            std::string userId = r[0]["id"].as<std::string>();
-
-            // 验证请求存在且当前用户是接收方
+    UserService::getUserIdBySub(
+        dbClient, sub,
+        [callback, dbClient, requestId, action, sub](const std::string& userId) {
             dbClient->execSqlAsync(
                 "SELECT from_user_id, to_user_id, status FROM friend_requests "
                 "WHERE id = $1 AND to_user_id = $2 AND status = 'pending'",
-                [callback, dbClient, requestId, action, userId](const drogon::orm::Result& r2) {
+                [callback, dbClient, requestId, action, sub](const drogon::orm::Result& r2) {
                     if (r2.size() == 0) {
-                        auto resp = drogon::HttpResponse::newHttpResponse();
-                        resp->setStatusCode(drogon::k404NotFound);
-                        resp->setBody("Friend request not found or already handled");
-                        callback(resp);
+                        callback(ApiResponse::err(ApiCode::FriendRequestNotFound,
+                                                "Friend request not found or already handled",
+                                                drogon::k404NotFound));
                         return;
                     }
-                    std::string fromUserId = r2[0]["from_user_id"].as<std::string>();
-                    std::string toUserId = r2[0]["to_user_id"].as<std::string>();
 
-                    std::string newStatus = (action == "accept") ? "accepted" : "rejected";
+                    const std::string fromUserId = r2[0]["from_user_id"].as<std::string>();
+                    const std::string toUserId = r2[0]["to_user_id"].as<std::string>();
+                    const std::string newStatus = (action == "accept") ? "accepted" : "rejected";
 
                     dbClient->execSqlAsync(
                         "UPDATE friend_requests SET status = $1 WHERE id = $2",
                         [callback, dbClient, fromUserId, toUserId, newStatus, action](const drogon::orm::Result&) {
                             if (action == "accept") {
-                                // 创建双向好友关系
                                 dbClient->execSqlAsync(
                                     "INSERT INTO friendships (user_id, friend_id) VALUES ($1, $2), ($2, $1) "
                                     "ON CONFLICT DO NOTHING",
-                                    [callback, newStatus](const drogon::orm::Result&) {
-                                        Json::Value json;
-                                        json["status"] = newStatus;
-                                        auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
-                                        callback(resp);
+                                    [callback, dbClient, fromUserId, toUserId, newStatus](const drogon::orm::Result&) {
+                                        Json::Value data;
+                                        data["status"] = newStatus;
+                                        callback(ApiResponse::ok(data));
+
+                                        UserService::getUserProfile(
+                                            dbClient, toUserId,
+                                            [fromUserId](const Json::Value& user) {
+                                                Json::Value pushData;
+                                                pushData["user"] = user;
+                                                WsHub::instance().pushToUser(fromUserId, "friend.accepted", pushData);
+                                            },
+                                            [](const std::string& err) {
+                                                LOG_WARN << "[Friend] friend.accepted push failed: " << err;
+                                            });
                                     },
                                     [callback](const drogon::orm::DrogonDbException& e) {
-                                        auto resp = drogon::HttpResponse::newHttpResponse();
-                                        resp->setStatusCode(drogon::k500InternalServerError);
-                                        resp->setBody(std::string("DB error: ") + e.base().what());
-                                        callback(resp);
+                                        callback(ApiResponse::err(ApiCode::Internal,
+                                                                std::string("DB error: ") + e.base().what(),
+                                                                drogon::k500InternalServerError));
                                     },
                                     fromUserId, toUserId);
                             } else {
-                                Json::Value json;
-                                json["status"] = newStatus;
-                                auto resp = drogon::HttpResponse::newHttpJsonResponse(json);
-                                callback(resp);
+                                Json::Value data;
+                                data["status"] = newStatus;
+                                callback(ApiResponse::ok(data));
                             }
                         },
                         [callback](const drogon::orm::DrogonDbException& e) {
-                            auto resp = drogon::HttpResponse::newHttpResponse();
-                            resp->setStatusCode(drogon::k500InternalServerError);
-                            resp->setBody(std::string("DB error: ") + e.base().what());
-                            callback(resp);
+                            callback(ApiResponse::err(ApiCode::Internal,
+                                                    std::string("DB error: ") + e.base().what(),
+                                                    drogon::k500InternalServerError));
                         },
                         newStatus, requestId);
                 },
                 [callback, sub](const drogon::orm::DrogonDbException& e) {
-                    LOG_ERROR << "[Friend] respondFriendRequest DB error user_sub=" << sub << " err=" << e.base().what();
-                    callback(makeError(drogon::k500InternalServerError, "DB error"));
+                    LOG_ERROR << "[Friend] respondFriendRequest DB error user_sub=" << sub
+                              << " err=" << e.base().what();
+                    callback(ApiResponse::err(ApiCode::Internal, "DB error", drogon::k500InternalServerError));
                 },
                 requestId, userId);
         },
-        [callback, sub](const drogon::orm::DrogonDbException& e) {
-            LOG_ERROR << "[Friend] respondFriendRequest lookup DB error user_sub=" << sub << " err=" << e.base().what();
-            callback(makeError(drogon::k500InternalServerError, "DB error"));
-        },
-        sub);
+        [callback](const std::string& err) {
+            callback(ApiResponse::err(ApiCode::UserNotFound, err, drogon::k404NotFound));
+        });
 }
 
 } // namespace chatlive

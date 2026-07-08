@@ -5,7 +5,7 @@
 #
 # Ports:
 #   5432  PostgreSQL
-#   6379  Redis
+#   6380  Redis (host; container internal 6379)
 #   9000  MinIO API   9001 Console
 #   1935  SRS RTMP
 #   1985  SRS HTTP API (WHIP/WHEP signaling)
@@ -65,6 +65,31 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: chatlive-minio-init
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      sleep 3;
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
+      mc mb local/$${MINIO_BUCKET} --ignore-existing;
+      mc anonymous set download local/$${MINIO_BUCKET};
+      echo 'MinIO bucket ready';
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-chatlive}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-chatlive_dev_minio}
+      MINIO_BUCKET: ${MINIO_BUCKET:-chatlive-media}
 
   # Dev-only: accepts all SRS publish hooks until chatlive-server is implemented.
   # Replace hook URL with http://chatlive:8088 when real service is ready.
@@ -115,30 +140,42 @@ services:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - srs
-      # - chatlive   # uncomment when chatlive-server is added
+      - chatlive
 
-  # chatlive-server (C++ Drogon) — placeholder for P1+ implementation
-  # chatlive:
-  #   build:
-  #     context: ../..
-  #     dockerfile: server/deploy/Dockerfile.chatlive
-  #   container_name: chatlive-server
-  #   restart: unless-stopped
-  #   environment:
-  #     DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-  #     REDIS_URL: redis://redis:6379
-  #     MINIO_ENDPOINT: http://minio:9000
-  #     KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER}
-  #     KEYCLOAK_JWKS_URI: ${KEYCLOAK_JWKS_URI}
-  #     SRS_HOOK_SECRET: dev
-  #   expose:
-  #     - "8088"
-  #     - "8089"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
+  chatlive:
+    build:
+      context: ../..
+      dockerfile: server/deploy/Dockerfile.chatlive
+    container_name: chatlive-server
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-chatlive}:${POSTGRES_PASSWORD:-chatlive_dev}@postgres:5432/${POSTGRES_DB:-chatlive}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER}
+      KEYCLOAK_JWKS_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM:-chatlive}/protocol/openid-connect/certs
+      TURN_SECRET: ${TURN_SECRET:-chatlive_turn_dev_secret}
+      TURN_REALM: ${TURN_REALM:-chatlive.local}
+      TURN_HOST: ${TURN_HOST:-127.0.0.1}
+      TURN_PORT: ${TURN_PORT:-3478}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://localhost:9000}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-chatlive}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-chatlive_dev_minio}
+      MINIO_BUCKET: ${MINIO_BUCKET:-chatlive-media}
+      SRS_HOOK_SECRET: dev
+    ports:
+      - "8088:8088"
+      - "8089:8089"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  # chatlive-server was previously a placeholder — now built from Dockerfile.chatlive
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.0

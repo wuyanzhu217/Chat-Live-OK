@@ -4,13 +4,16 @@
 #include "../modules/OidcTokenValidator.h"
 #include "WsEvent.h"
 #include <json/json.h>
-#include <unordered_map>
+#include <chrono>
 #include <mutex>
+#include <unordered_map>
 
 namespace chatlive {
 
-class WsController : public drogon::WebSocketController<WsController> {
+class WsController : public drogon::WebSocketController<WsController, false> {
 public:
+    static constexpr int kIdleTimeoutSec = 90;
+
     explicit WsController(const std::string& jwksUri,
                           const std::string& expectedIssuer = "");
 
@@ -23,35 +26,35 @@ public:
 
     void handleConnectionClosed(const drogon::WebSocketConnectionPtr& conn) override;
 
+    static void checkIdleConnections();
+
     WS_PATH_LIST_BEGIN
     WS_PATH_ADD("/v1/ws", drogon::Get);
     WS_PATH_LIST_END
 
 private:
     void dispatchEvent(const drogon::WebSocketConnectionPtr& conn,
-                       const std::string& userSub,
-                       EventType eventType,
+                       const std::string& userId,
+                       ws::EventType eventType,
                        const Json::Value& data);
 
-    // 事件处理函数
     void handlePing(const drogon::WebSocketConnectionPtr& conn);
-    void handleMessageNew(const drogon::WebSocketConnectionPtr& conn,
-                          const std::string& userSub,
-                          const Json::Value& data);
     void handleTyping(const drogon::WebSocketConnectionPtr& conn,
-                      const std::string& userSub,
-                      EventType type,
+                      const std::string& userId,
+                      ws::EventType type,
                       const Json::Value& data);
+    void handleMessageRead(const drogon::WebSocketConnectionPtr& conn,
+                           const std::string& userId,
+                           const Json::Value& data);
     void handleWebRtcSignal(const drogon::WebSocketConnectionPtr& conn,
-                            const std::string& userSub,
-                            EventType type,
+                            const std::string& userId,
+                            ws::EventType type,
                             const Json::Value& data);
 
-    OidcTokenValidator validator_;
+    void sendError(const drogon::WebSocketConnectionPtr& conn,
+                   const std::string& message);
 
-    // 简单在线用户映射（user_sub -> connection）
-    static std::unordered_map<std::string, drogon::WebSocketConnectionPtr> onlineUsers_;
-    static std::mutex onlineMutex_;
+    OidcTokenValidator validator_;
 };
 
 } // namespace chatlive

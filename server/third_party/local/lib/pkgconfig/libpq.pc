@@ -1,0 +1,14 @@
+prefix=/home/chenguangxi/Chat-Live-OK/server/third_party/local
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libpq
+Description: PostgreSQL libpq library
+URL: https://www.postgresql.org/
+Version: 16.4
+Requires: 
+Requires.private: libssl, libcrypto
+Cflags: -I${includedir}
+Libs: -L${libdir} -lpq
+Libs.private: -L/home/chenguangxi/Chat-Live-OK/server/third_party/local/lib -lpgcommon -lpgport -lssl -lm

@@ -3,12 +3,15 @@ SHELL := /bin/bash
 COMPOSE_FILE := server/deploy/docker-compose.yml
 ENV_FILE     := server/deploy/.env
 
-.PHONY: dev-up dev-down dev-logs dev-ps srs-test init-keycloak-db help
+.PHONY: dev-up dev-down dev-logs dev-ps srs-test init-keycloak-db chatlive-build dev-up-full smoke-p2 help
 
 help:
 	@echo "Chat-Live-OK Monorepo"
 	@echo ""
 	@echo "  make dev-up           Start dev stack (Postgres, Redis, MinIO, SRS, Keycloak, coturn, nginx)"
+	@echo "  make dev-up-full      Build chatlive-server image and start full stack"
+	@echo "  make chatlive-build   Build chatlive-server Docker image only"
+	@echo "  make smoke-p2         Run P2 IM smoke test (needs jq, running stack)"
 	@echo "  make dev-down         Stop dev stack"
 	@echo "  make dev-logs         Follow compose logs"
 	@echo "  make dev-ps           Show running services"
@@ -20,6 +23,17 @@ help:
 dev-up:
 	@test -f $(ENV_FILE) || (echo "Copy server/deploy/.env.example to server/deploy/.env first" && exit 1)
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d
+
+chatlive-build:
+	@test -f $(ENV_FILE) || (echo "Copy server/deploy/.env.example to server/deploy/.env first" && exit 1)
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) build chatlive
+
+dev-up-full: chatlive-build
+	@test -f $(ENV_FILE) || (echo "Copy server/deploy/.env.example to server/deploy/.env first" && exit 1)
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d
+
+smoke-p2:
+	@bash server/scripts/smoke-p2.sh
 
 dev-down:
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) down
