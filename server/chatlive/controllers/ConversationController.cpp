@@ -5,6 +5,7 @@
 
 #include <drogon/HttpAppFramework.h>
 #include <drogon/drogon.h>
+#include <json/json.h>
 #include <memory>
 
 namespace chatlive {
@@ -30,6 +31,17 @@ static Json::Value conversationFromRow(const drogon::orm::Row& row)
     item["name"] = row["name"].isNull() ? Json::Value::null : row["name"].as<std::string>();
     item["avatar_url"] = row["avatar_url"].isNull() ? Json::Value::null : row["avatar_url"].as<std::string>();
     item["updated_at"] = row["updated_at"].as<std::string>();
+    item["members"] = Json::Value(Json::arrayValue);
+    if (!row["members_json"].isNull()) {
+        Json::CharReaderBuilder builder;
+        Json::Value members;
+        std::string errs;
+        const auto raw = row["members_json"].as<std::string>();
+        std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+        if (reader->parse(raw.data(), raw.data() + raw.size(), &members, &errs) && members.isArray()) {
+            item["members"] = members;
+        }
+    }
     if (!row["unread_count"].isNull()) {
         item["unread_count"] = static_cast<Json::Int64>(row["unread_count"].as<long long>());
     }
@@ -63,7 +75,16 @@ void ConversationController::listConversations(const drogon::HttpRequestPtr& req
                 "          AND m.sender_id <> cm.user_id "
                 "          AND m.created_at > COALESCE("
                 "            (SELECT created_at FROM messages WHERE id = cm.last_read_msg_id), "
-                "            '1970-01-01'::timestamptz)) AS unread_count "
+                "            '1970-01-01'::timestamptz)) AS unread_count, "
+                "       (SELECT COALESCE(json_agg(json_build_object("
+                "           'user_id', u.id, "
+                "           'role', cm2.role, "
+                "           'nickname', u.nickname, "
+                "           'avatar_url', u.avatar_url"
+                "         )), '[]'::json)::text "
+                "        FROM conversation_members cm2 "
+                "        JOIN users u ON u.id = cm2.user_id "
+                "        WHERE cm2.conversation_id = c.id) AS members_json "
                 "FROM conversation_members cm "
                 "JOIN conversations c ON c.id = cm.conversation_id "
                 "LEFT JOIN LATERAL ("

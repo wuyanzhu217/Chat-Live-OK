@@ -8,7 +8,8 @@ const props = defineProps<{ conversation: Conversation }>()
 const auth = useAuthStore()
 
 const peer = computed(() => {
-  return props.conversation.members.find((m) => m.user_id !== auth.userId) ?? props.conversation.members[0]
+  const members = props.conversation.members ?? []
+  return members.find((m) => m.user_id !== auth.userId) ?? members[0]
 })
 
 const preview = computed(() => {

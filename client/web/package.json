@@ -10,17 +10,18 @@
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix"
   },
   "dependencies": {
-    "vue": "^3.5.13",
-    "vue-router": "^4.5.0",
+    "hls.js": "^1.5.20",
     "pinia": "^2.3.0",
     "vant": "^4.9.18",
-    "hls.js": "^1.5.20"
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "typescript": "~5.7.2",
     "vite": "^6.0.7",
-    "vue-tsc": "^2.2.0",
-    "@types/node": "^22.10.5"
+    "vue-tsc": "^2.2.0"
   }
 }

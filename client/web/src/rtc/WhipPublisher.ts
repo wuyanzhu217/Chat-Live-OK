@@ -1,7 +1,7 @@
 /**
  * WHIP publisher for Web live broadcast → SRS 6.x
  */
-import { waitIceGathering } from './ice'
+import { waitIceConnected, waitIceGathering } from './ice'
 
 export class WhipPublisher {
   private pc: RTCPeerConnection | null = null
@@ -37,6 +37,16 @@ export class WhipPublisher {
 
     const answerSdp = await response.text()
     await this.pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
+
+    // HTTP 信令成功 ≠ 媒体入库；需等 ICE/DTLS 真正连通
+    try {
+      await waitIceConnected(this.pc, 12000)
+    } catch {
+      this.stop()
+      throw new Error(
+        '推流信令成功，但媒体未到达 SRS（UDP :8000）。请确认 SRS_CANDIDATE 为可从本机访问的 VM 局域网 IP，且防火墙放行 UDP 8000。',
+      )
+    }
   }
 
   stop(): void {

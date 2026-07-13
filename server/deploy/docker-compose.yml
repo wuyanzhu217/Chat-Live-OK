@@ -151,7 +151,7 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-chatlive}:${POSTGRES_PASSWORD:-chatlive_dev}@postgres:5432/${POSTGRES_DB:-chatlive}
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER}
-      KEYCLOAK_JWKS_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM:-chatlive}/protocol/openid-connect/certs
+      KEYCLOAK_JWKS_URI: http://keycloak:8080/auth/realms/${KEYCLOAK_REALM:-chatlive}/protocol/openid-connect/certs
       TURN_SECRET: ${TURN_SECRET:-chatlive_turn_dev_secret}
       TURN_REALM: ${TURN_REALM:-chatlive.local}
       TURN_HOST: ${TURN_HOST:-127.0.0.1}
@@ -187,8 +187,8 @@ services:
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: ${KEYCLOAK_DB_USER:-keycloak}
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak_dev}
-      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-localhost}
-      KC_HOSTNAME_PORT: ${KEYCLOAK_HTTP_PORT:-8081}
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-http://127.0.0.1:8888/auth}
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_HTTPS: "false"
       KC_HTTP_ENABLED: "true"
@@ -204,11 +204,12 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3"]
+      # Keycloak 26: health on management port 9000; KC_HTTP_RELATIVE_PATH=/auth
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /auth/health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3"]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 60s
+      start_period: 90s
 
 volumes:
   postgres_data:

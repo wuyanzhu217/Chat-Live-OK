@@ -1,8 +1,24 @@
 <script setup lang="ts">
-import { Button } from 'vant'
+import { ref } from 'vue'
+import { Button, showToast } from 'vant'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
+const loggingIn = ref(false)
+
+async function onLogin() {
+  if (loggingIn.value) return
+  loggingIn.value = true
+  try {
+    await auth.login()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '登录失败'
+    showToast(msg)
+    console.error('[login]', err)
+  } finally {
+    loggingIn.value = false
+  }
+}
 </script>
 
 <template>
@@ -11,7 +27,16 @@ const auth = useAuthStore()
       <h1>Chat-Live-OK</h1>
       <p>即时通讯 · 直播演示</p>
     </div>
-    <Button type="primary" block round size="large" @click="auth.login()">使用 Keycloak 登录</Button>
+    <Button
+      type="primary"
+      block
+      round
+      size="large"
+      :loading="loggingIn"
+      @click="onLogin"
+    >
+      使用 Keycloak 登录
+    </Button>
     <p class="login__hint">测试账号：alice / alice_dev，bob / bob_dev</p>
   </div>
 </template>

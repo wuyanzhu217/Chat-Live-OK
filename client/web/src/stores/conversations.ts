@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { getConversations } from '@/api/conversations'
+import { getConversation, getConversations } from '@/api/conversations'
 import type { Conversation } from '@/types/conversation'
 import type { Message } from '@/types/message'
 
@@ -8,11 +8,36 @@ export const useConversationsStore = defineStore('conversations', () => {
   const items = ref<Conversation[]>([])
   const loading = ref(false)
 
+  async function enrichMembers(list: Conversation[]): Promise<Conversation[]> {
+    return Promise.all(
+      list.map(async (c) => {
+        if (c.members?.length) return c
+        try {
+          const full = await getConversation(c.id)
+          return {
+            ...c,
+            members: full.members ?? [],
+            name: c.name ?? full.name,
+            avatar_url: c.avatar_url ?? full.avatar_url,
+          }
+        } catch {
+          return { ...c, members: c.members ?? [] }
+        }
+      }),
+    )
+  }
+
   async function fetchConversations(): Promise<void> {
     loading.value = true
     try {
       const page = await getConversations()
-      items.value = page.items
+      const normalized = (page.items ?? []).map((c) => ({
+        ...c,
+        members: c.members ?? [],
+        last_message: c.last_message ?? null,
+        unread_count: c.unread_count ?? 0,
+      }))
+      items.value = await enrichMembers(normalized)
     } finally {
       loading.value = false
     }

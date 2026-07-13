@@ -24,7 +24,7 @@ const loading = ref(true)
 const conv = computed(() => conversations.items.find((c) => c.id === convId.value))
 
 const peer = computed(() => {
-  return conv.value?.members.find((m) => m.user_id !== auth.userId)
+  return conv.value?.members?.find((m) => m.user_id !== auth.userId)
 })
 
 const peerPresence = computed(() => {
