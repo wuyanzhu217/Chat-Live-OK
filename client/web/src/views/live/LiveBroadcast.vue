@@ -1,38 +1,44 @@
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue'
+import { computed, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { NavBar, Button, Field, showToast } from 'vant'
+import { NavBar, Button, showToast, showFailToast } from 'vant'
+import { env } from '@/config/env'
 import { WhipPublisher } from '@/rtc/WhipPublisher'
 
 const route = useRoute()
 const roomId = ref((route.params.roomId as string) || 'livestream')
-const whipUrl = ref(
-  `http://127.0.0.1:8888/rtc/v1/whip/?app=live&stream=${roomId.value}&token=dev`,
+const whipUrl = computed(
+  () => `${env.liveRtcBase}/v1/whip/?app=live&stream=${roomId.value}&token=dev`,
 )
 const publishing = ref(false)
+const videoRef = ref<HTMLVideoElement | null>(null)
 let publisher: WhipPublisher | null = null
 let localStream: MediaStream | null = null
 
-async function startBroadcast() {
+async function startBroadcast(): Promise<void> {
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: 1280, height: 720 },
       audio: true,
     })
+    if (videoRef.value) {
+      videoRef.value.srcObject = localStream
+    }
     publisher = new WhipPublisher()
     await publisher.start(whipUrl.value, localStream)
     publishing.value = true
     showToast('开播成功')
   } catch (e) {
-    showToast(String(e))
+    showFailToast(e instanceof Error ? e.message : String(e))
   }
 }
 
-function stopBroadcast() {
+function stopBroadcast(): void {
   publisher?.stop()
   publisher = null
   localStream?.getTracks().forEach((t) => t.stop())
   localStream = null
+  if (videoRef.value) videoRef.value.srcObject = null
   publishing.value = false
 }
 
@@ -40,31 +46,76 @@ onUnmounted(stopBroadcast)
 </script>
 
 <template>
-  <div class="broadcast">
+  <div class="broadcast" :class="{ 'broadcast--live': publishing }">
     <NavBar title="直播开播" fixed placeholder />
-    <Field v-model="roomId" label="stream" readonly />
-    <Field v-model="whipUrl" label="WHIP URL" type="textarea" rows="2" />
+    <div class="broadcast__stage">
+      <video ref="videoRef" class="broadcast__preview" autoplay muted playsinline />
+      <div v-if="!publishing" class="broadcast__placeholder">点击开始推流后显示摄像头</div>
+    </div>
+    <div v-if="!publishing" class="broadcast__meta">
+      <p class="broadcast__room">房间：{{ roomId }}</p>
+    </div>
     <div class="broadcast__actions">
-      <Button v-if="!publishing" type="primary" block @click="startBroadcast">
+      <Button v-if="!publishing" type="primary" block size="large" @click="startBroadcast">
         开始推流 (WHIP)
       </Button>
-      <Button v-else type="danger" block @click="stopBroadcast">结束推流</Button>
+      <template v-else>
+        <Button type="danger" block size="large" @click="stopBroadcast">结束推流</Button>
+        <router-link class="broadcast__watch-link" :to="`/live/watch/${roomId}`" target="_blank">
+          新窗口打开观看页
+        </router-link>
+      </template>
     </div>
-    <p class="broadcast__hint">开发环境使用 mock-auth；生产需 HTTPS + chatlive start API。</p>
   </div>
 </template>
 
 <style scoped>
 .broadcast {
-  padding: 16px;
-  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #111;
+  color: #fff;
+}
+.broadcast--live .broadcast__stage {
+  min-height: calc(100vh - 120px);
+}
+.broadcast__stage {
+  position: relative;
+  flex: 1;
+  min-height: 52vh;
+  background: #000;
+}
+.broadcast__preview {
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+.broadcast__placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font-size: 14px;
+}
+.broadcast__meta {
+  padding: 12px 16px;
+  background: #1a1a1a;
 }
 .broadcast__actions {
-  margin-top: 16px;
+  padding: 12px 16px;
+  background: #1a1a1a;
 }
-.broadcast__hint {
-  margin-top: 16px;
-  font-size: 12px;
-  color: #999;
+.broadcast__watch-link {
+  display: block;
+  margin-top: 12px;
+  text-align: center;
+  color: #4fc3f7;
+  font-size: 14px;
+  text-decoration: none;
 }
 </style>

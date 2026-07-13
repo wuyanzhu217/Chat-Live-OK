@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button, CellGroup, Cell } from 'vant'
+import { CellGroup, Cell } from 'vant'
 </script>
 
 <template>
