@@ -30,6 +30,7 @@ export const useCallsStore = defineStore('calls', () => {
   const error = ref<string | null>(null)
   const muted = ref(false)
   const cameraOff = ref(false)
+  const localHasVideo = ref(false)
   const localStream = shallowRef<MediaStream | null>(null)
   const remoteStream = shallowRef<MediaStream | null>(null)
   const busy = ref(false)
@@ -67,6 +68,7 @@ export const useCallsStore = defineStore('calls', () => {
     remoteStream.value = null
     muted.value = false
     cameraOff.value = false
+    localHasVideo.value = false
   }
 
   function resetAll(): void {
@@ -129,6 +131,10 @@ export const useCallsStore = defineStore('calls', () => {
       await nextPeer.start(rtc.ice_servers, call.value.type)
       peer = nextPeer
       localStream.value = peer.getLocalStream()
+      localHasVideo.value = peer.hasLocalVideo()
+      if (!localHasVideo.value) {
+        cameraOff.value = true
+      }
 
       if (earlyOffer && !isCaller) {
         const sdp = earlyOffer
@@ -377,6 +383,7 @@ export const useCallsStore = defineStore('calls', () => {
   }
 
   function toggleCamera(): void {
+    if (!localHasVideo.value) return
     cameraOff.value = !cameraOff.value
     peer?.setCameraEnabled(!cameraOff.value)
   }
@@ -387,6 +394,7 @@ export const useCallsStore = defineStore('calls', () => {
     error,
     muted,
     cameraOff,
+    localHasVideo,
     localStream,
     remoteStream,
     busy,

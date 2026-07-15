@@ -29,8 +29,12 @@ const statusHint = computed(() => {
   if (calls.phase === 'outgoing') return '等待对方接听'
   if (calls.phase === 'incoming') return calls.callType === 'video' ? '视频来电' : '语音来电'
   if (calls.phase === 'connecting') return '建立媒体连接'
-  if (calls.callType === 'video' && !hasRemoteVideo.value) return '等待对方画面…'
-  return calls.callType === 'video' ? '视频通话中' : '语音通话中'
+  if (calls.callType === 'video') {
+    if (!hasRemoteVideo.value) return '等待对方画面…'
+    if (!calls.localHasVideo) return '本端语音 · 可观看对方'
+    return '视频通话中'
+  }
+  return '语音通话中'
 })
 
 async function bindAndPlay(
@@ -126,7 +130,12 @@ async function onHangup(): Promise<void> {
           </div>
         </div>
         <video
-          v-show="calls.callType === 'video' && calls.localStream && !calls.cameraOff"
+          v-show="
+            calls.callType === 'video' &&
+            calls.localHasVideo &&
+            calls.localStream &&
+            !calls.cameraOff
+          "
           id="call-local-video"
           class="call-overlay__local"
           autoplay
@@ -180,7 +189,7 @@ async function onHangup(): Promise<void> {
             <span>{{ calls.muted ? '取消静音' : '静音' }}</span>
           </button>
           <button
-            v-if="calls.callType === 'video'"
+            v-if="calls.callType === 'video' && calls.localHasVideo"
             type="button"
             class="call-btn call-btn--secondary"
             @click="calls.toggleCamera()"

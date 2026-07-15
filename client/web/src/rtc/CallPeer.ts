@@ -6,13 +6,13 @@ export type CallPeerHandlers = {
   onConnectionState?: (state: RTCPeerConnectionState) => void
   /** Fatal: should end the call */
   onError?: (err: Error) => void
-  /** Non-fatal: e.g. camera unavailable, continued as audio */
+  /** Non-fatal: e.g. camera unavailable, still receiving remote video */
   onWarning?: (message: string) => void
 }
 
 /**
  * 1v1 P2P WebRTC session with trickle ICE over WS (`webrtc.*`).
- * Caller creates offer after `connected`; callee waits for offer.
+ * Video call: if no local camera, video transceiver is recvonly so peer video still arrives.
  */
 export class CallPeer {
   private pc: RTCPeerConnection | null = null
@@ -22,6 +22,8 @@ export class CallPeer {
   private makingAnswer = false
   private pendingCandidates: Array<{ candidate: string; mid?: string; mlineIndex?: number }> = []
   private closed = false
+  private localHasVideo = false
+  private callType: CallType = 'audio'
 
   constructor(
     private readonly callId: string,
@@ -38,6 +40,10 @@ export class CallPeer {
     return this.remoteStream
   }
 
+  hasLocalVideo(): boolean {
+    return this.localHasVideo
+  }
+
   /** True after start() has created RTCPeerConnection. */
   isReady(): boolean {
     return !!this.pc && !this.closed
@@ -45,8 +51,11 @@ export class CallPeer {
 
   async start(iceServers: IceServerConfig[], type: CallType): Promise<void> {
     if (this.closed) return
+    this.callType = type
 
-    this.localStream = await this.acquireLocalMedia(type)
+    const acquired = await this.acquireLocalMedia(type)
+    this.localStream = acquired.stream
+    this.localHasVideo = acquired.hasVideo
 
     this.pc = new RTCPeerConnection({ iceServers })
     this.remoteStream = new MediaStream()
@@ -54,11 +63,9 @@ export class CallPeer {
     this.pc.ontrack = (ev) => {
       const stream = this.remoteStream
       if (!stream) return
-      // Prefer the inbound track; avoid re-adding duplicates from streams[0]
       if (!stream.getTracks().some((t) => t.id === ev.track.id)) {
         stream.addTrack(ev.track)
       }
-      // New MediaStream reference so Vue shallowRef watchers fire on each track
       const next = new MediaStream(stream.getTracks())
       this.remoteStream = next
       this.handlers.onRemoteStream?.(next)
@@ -86,9 +93,7 @@ export class CallPeer {
       }
     }
 
-    for (const track of this.localStream.getTracks()) {
-      this.pc.addTrack(track, this.localStream)
-    }
+    this.attachSendRecvTracks()
 
     if (this.isCaller) {
       const offer = await this.pc.createOffer()
@@ -105,12 +110,36 @@ export class CallPeer {
   }
 
   /**
-   * Acquire mic/camera. Video call falls back to audio-only if camera is busy
-   * or unavailable, so signaling (answer) can still complete.
+   * Audio always sendrecv (or recvonly if no mic).
+   * Video call: sendrecv if local camera, else recvonly so remote video still negotiates.
    */
-  private async acquireLocalMedia(type: CallType): Promise<MediaStream> {
+  private attachSendRecvTracks(): void {
+    if (!this.pc || !this.localStream) return
+
+    const audio = this.localStream.getAudioTracks()[0]
+    if (audio) {
+      this.pc.addTrack(audio, this.localStream)
+    } else {
+      this.pc.addTransceiver('audio', { direction: 'recvonly' })
+    }
+
+    if (this.callType !== 'video') return
+
+    const video = this.localStream.getVideoTracks()[0]
+    if (video) {
+      this.pc.addTrack(video, this.localStream)
+    } else {
+      // Keep m=video in SDP as recvonly — peer can still send camera
+      this.pc.addTransceiver('video', { direction: 'recvonly' })
+    }
+  }
+
+  private async acquireLocalMedia(
+    type: CallType,
+  ): Promise<{ stream: MediaStream; hasVideo: boolean }> {
     if (type !== 'video') {
-      return navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      return { stream, hasVideo: false }
     }
 
     const attempts: MediaStreamConstraints[] = [
@@ -122,19 +151,20 @@ export class CallPeer {
     let lastError: unknown
     for (const constraints of attempts) {
       try {
-        return await navigator.mediaDevices.getUserMedia(constraints)
+        const stream = await navigator.mediaDevices.getUserMedia(constraints)
+        return { stream, hasVideo: stream.getVideoTracks().length > 0 }
       } catch (e) {
         lastError = e
       }
     }
 
-    // Camera unavailable — continue with audio; do NOT treat as fatal hangup
+    // No camera — mic only; video stays recvonly after attach
     try {
-      const audioOnly = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
       this.handlers.onWarning?.(
-        '摄像头无法打开（可能被占用），已降级为语音通话',
+        '本端无摄像头，仍可听/说并观看对方画面',
       )
-      return audioOnly
+      return { stream, hasVideo: false }
     } catch {
       const msg =
         lastError instanceof Error ? lastError.message : 'Could not start media devices'
@@ -170,7 +200,6 @@ export class CallPeer {
   async handleAnswer(sdp: string): Promise<void> {
     if (!this.pc || this.closed) return
     if (this.pc.signalingState !== 'have-local-offer' && this.pc.signalingState !== 'have-remote-offer') {
-      // Already stable or unexpected — ignore duplicate answers
       if (this.pc.remoteDescription) return
     }
     await this.pc.setRemoteDescription({ type: 'answer', sdp })
@@ -238,5 +267,6 @@ export class CallPeer {
     this.remoteStream = null
     this.remoteDescSet = false
     this.makingAnswer = false
+    this.localHasVideo = false
   }
 }
