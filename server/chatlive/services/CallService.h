@@ -85,6 +85,12 @@ public:
 
     static void expireRingingCalls(const drogon::orm::DbClientPtr& db);
 
+    /** 强制结束某用户所有 ringing/connected 通话（回收幽灵会话） */
+    static void forceEndActiveCallsForUser(const drogon::orm::DbClientPtr& db,
+                                          const std::string& userId,
+                                          VoidCallback onDone,
+                                          ErrorCallback onError);
+
 private:
     static void loadParticipants(const drogon::orm::DbClientPtr& db,
                                    const std::string& callId,

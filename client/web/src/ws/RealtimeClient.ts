@@ -13,6 +13,7 @@ export class RealtimeClient {
   private reconnectAttempt = 0
   private shouldReconnect = false
   private intentionalClose = false
+  private pendingSend: Array<{ event: string; data: Record<string, unknown> }> = []
 
   on(event: string, handler: WsEventHandler): void {
     if (!this.handlers.has(event)) {
@@ -60,6 +61,7 @@ export class RealtimeClient {
       this.reconnectAttempt = 0
       this.emitConnection(true)
       this.startPing()
+      this.flushPendingSend()
     }
 
     ws.onmessage = (ev) => {
@@ -103,13 +105,27 @@ export class RealtimeClient {
     this.emitConnection(false)
   }
 
-  send(event: string, data: Record<string, unknown> = {}): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+  send(event: string, data: Record<string, unknown> = {}): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      if (event.startsWith('webrtc.')) {
+        this.pendingSend.push({ event, data })
+      }
+      return false
+    }
     this.ws.send(JSON.stringify({ event, data }))
+    return true
   }
 
   get connected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
+  }
+
+  private flushPendingSend(): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
+    const queued = this.pendingSend.splice(0)
+    for (const item of queued) {
+      this.ws.send(JSON.stringify(item))
+    }
   }
 
   private startPing(): void {

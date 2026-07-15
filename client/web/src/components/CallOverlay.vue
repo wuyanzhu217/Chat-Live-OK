@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, nextTick, watch } from 'vue'
 import { Icon, showToast } from 'vant'
 import { useCallsStore } from '@/stores/calls'
 
 const calls = useCallsStore()
 
 const visible = computed(() => calls.isActive)
+const hasRemoteVideo = computed(() => {
+  const stream = calls.remoteStream
+  return !!stream && stream.getVideoTracks().some((t) => t.readyState !== 'ended')
+})
 const title = computed(() => {
   const name = calls.peerParticipant?.nickname || '对方'
   if (calls.phase === 'incoming') {
@@ -25,34 +29,52 @@ const statusHint = computed(() => {
   if (calls.phase === 'outgoing') return '等待对方接听'
   if (calls.phase === 'incoming') return calls.callType === 'video' ? '视频来电' : '语音来电'
   if (calls.phase === 'connecting') return '建立媒体连接'
+  if (calls.callType === 'video' && !hasRemoteVideo.value) return '等待对方画面…'
   return calls.callType === 'video' ? '视频通话中' : '语音通话中'
 })
 
-function bindStream(el: HTMLVideoElement | null, stream: MediaStream | null): void {
+async function bindAndPlay(
+  el: HTMLVideoElement | null,
+  stream: MediaStream | null,
+  muted: boolean,
+): Promise<void> {
   if (!el) return
   if (el.srcObject !== stream) {
     el.srcObject = stream
   }
+  el.muted = muted
+  if (!stream) return
+  try {
+    await el.play()
+  } catch (e) {
+    // Autoplay with audio may be blocked — retry muted then unmute audio via element
+    console.warn('[CallOverlay] video.play blocked', e)
+    try {
+      el.muted = true
+      await el.play()
+      if (!muted) el.muted = false
+    } catch (e2) {
+      console.warn('[CallOverlay] video.play retry failed', e2)
+    }
+  }
 }
 
 watch(
-  () => [calls.remoteStream, calls.phase] as const,
-  () => {
-    // next tick via requestAnimationFrame so v-show video exists
-    requestAnimationFrame(() => {
-      const el = document.getElementById('call-remote-video') as HTMLVideoElement | null
-      bindStream(el, calls.remoteStream)
-    })
+  () => [calls.remoteStream, calls.phase, hasRemoteVideo.value] as const,
+  async () => {
+    await nextTick()
+    const el = document.getElementById('call-remote-video') as HTMLVideoElement | null
+    // Keep remote video muted=false so we hear peer; play() may need gesture retry
+    await bindAndPlay(el, calls.remoteStream, false)
   },
 )
 
 watch(
   () => [calls.localStream, calls.cameraOff, calls.phase] as const,
-  () => {
-    requestAnimationFrame(() => {
-      const el = document.getElementById('call-local-video') as HTMLVideoElement | null
-      bindStream(el, calls.localStream)
-    })
+  async () => {
+    await nextTick()
+    const el = document.getElementById('call-local-video') as HTMLVideoElement | null
+    await bindAndPlay(el, calls.localStream, true)
   },
 )
 
@@ -89,14 +111,14 @@ async function onHangup(): Promise<void> {
     >
       <div class="call-overlay__stage">
         <video
-          v-show="calls.callType === 'video' && calls.remoteStream"
+          v-show="calls.callType === 'video' && hasRemoteVideo"
           id="call-remote-video"
           class="call-overlay__remote"
           autoplay
           playsinline
         />
         <div
-          v-if="calls.callType === 'audio' || !calls.remoteStream"
+          v-if="calls.callType === 'audio' || !hasRemoteVideo"
           class="call-overlay__avatar-wrap"
         >
           <div class="call-overlay__avatar">

@@ -7,6 +7,7 @@
 #include <drogon/drogon.h>
 #include <drogon/utils/Utilities.h>
 #include <cmath>
+#include <memory>
 #include <sstream>
 
 namespace chatlive {
@@ -295,17 +296,23 @@ void CallService::initiate(const drogon::orm::DbClientPtr& db,
                     isUserBusy(
                         db, callerId,
                         [db, callerId, calleeId, type, conversationId, onSuccess, onError](bool callerBusy) {
+                            auto proceed = [db, callerId, calleeId, type, conversationId, onSuccess, onError]() {
+                                ensureConversation(
+                                    db, callerId, calleeId, conversationId,
+                                    [db, callerId, calleeId, type, onSuccess, onError](const std::string& convId) {
+                                        createCall(db, callerId, calleeId, type, convId, onSuccess, onError);
+                                    },
+                                    onError);
+                            };
+
                             if (callerBusy) {
-                                onError("Caller busy");
+                                // 本端残留 ringing/connected（媒体失败未挂断）→ 自动清掉再发起
+                                LOG_WARN << "[Call] clearing stale active calls for caller " << callerId;
+                                forceEndActiveCallsForUser(db, callerId, proceed, onError);
                                 return;
                             }
 
-                            ensureConversation(
-                                db, callerId, calleeId, conversationId,
-                                [db, callerId, calleeId, type, onSuccess, onError](const std::string& convId) {
-                                    createCall(db, callerId, calleeId, type, convId, onSuccess, onError);
-                                },
-                                onError);
+                            proceed();
                         },
                         onError);
                 },
@@ -684,8 +691,58 @@ void CallService::validateWebRtcParticipant(const drogon::orm::DbClientPtr& db,
         callId, fromUserId, toUserId);
 }
 
+void CallService::forceEndActiveCallsForUser(const drogon::orm::DbClientPtr& db,
+                                             const std::string& userId,
+                                             VoidCallback onDone,
+                                             ErrorCallback onError)
+{
+    db->execSqlAsync(
+        "UPDATE calls c SET status = 'ended', ended_at = NOW() "
+        "FROM call_participants cp "
+        "WHERE cp.call_id = c.id AND cp.user_id = $1 "
+        "AND c.status IN ('ringing', 'connected') "
+        "RETURNING c.id",
+        [db, userId, onDone, onError](const drogon::orm::Result& r) {
+            if (r.size() == 0) {
+                onDone();
+                return;
+            }
+            // Notify peers & write records; finish after last one (best-effort)
+            auto remaining = std::make_shared<int>(static_cast<int>(r.size()));
+            for (const auto& row : r) {
+                const std::string callId = row["id"].as<std::string>();
+                loadCall(
+                    db, callId,
+                    [db, callId, userId, remaining, onDone](const Json::Value& call) {
+                        std::vector<std::string> userIds;
+                        for (const auto& p : call["participants"]) {
+                            userIds.push_back(p["user_id"].asString());
+                        }
+                        pushCallState(callId, "ended", userIds, "stale_cleanup");
+                        emitCallRecord(db, callId, userId, "cancelled",
+                                       [remaining, onDone](const Json::Value&) {
+                                           if (--(*remaining) <= 0) {
+                                               onDone();
+                                           }
+                                       });
+                    },
+                    [remaining, onDone](const std::string& err) {
+                        LOG_WARN << "[Call] forceEnd load failed: " << err;
+                        if (--(*remaining) <= 0) {
+                            onDone();
+                        }
+                    });
+            }
+        },
+        [onError](const drogon::orm::DrogonDbException& e) {
+            onError(std::string("DB error: ") + e.base().what());
+        },
+        userId);
+}
+
 void CallService::expireRingingCalls(const drogon::orm::DbClientPtr& db)
 {
+    // ringing 超时
     db->execSqlAsync(
         "UPDATE calls SET status = 'missed', ended_at = NOW() "
         "WHERE status = 'ringing' AND created_at < NOW() - INTERVAL '60 seconds' "
@@ -717,6 +774,41 @@ void CallService::expireRingingCalls(const drogon::orm::DbClientPtr& db)
         },
         [](const drogon::orm::DrogonDbException& e) {
             LOG_WARN << "[Call] expireRingingCalls: " << e.base().what();
+        });
+
+    // connected 僵尸会话（媒体失败未挂断）超过 5 分钟自动结束
+    db->execSqlAsync(
+        "UPDATE calls SET status = 'ended', ended_at = NOW() "
+        "WHERE status = 'connected' "
+        "AND COALESCE(started_at, created_at) < NOW() - INTERVAL '5 minutes' "
+        "RETURNING id",
+        [db](const drogon::orm::Result& r) {
+            for (const auto& row : r) {
+                const std::string callId = row["id"].as<std::string>();
+                loadCall(
+                    db, callId,
+                    [db, callId](const Json::Value& call) {
+                        std::vector<std::string> userIds;
+                        std::string actorId;
+                        for (const auto& p : call["participants"]) {
+                            userIds.push_back(p["user_id"].asString());
+                            if (actorId.empty()) {
+                                actorId = p["user_id"].asString();
+                            }
+                        }
+                        pushCallState(callId, "ended", userIds, "stale_connected");
+                        if (!actorId.empty()) {
+                            emitCallRecord(db, callId, actorId, "ended",
+                                           [](const Json::Value&) {});
+                        }
+                    },
+                    [](const std::string& err) {
+                        LOG_WARN << "[Call] expireConnected load failed: " << err;
+                    });
+            }
+        },
+        [](const drogon::orm::DrogonDbException& e) {
+            LOG_WARN << "[Call] expireConnected: " << e.base().what();
         });
 }
 

@@ -70,7 +70,12 @@ async function startCall(type: CallType): Promise<void> {
     await calls.initiate(peer.value.user_id, type, convId.value)
   } catch (e) {
     if (e instanceof ApiError && e.code === 4002) {
-      showFailToast('对方忙线中')
+      const msg = e.message || ''
+      if (/caller busy/i.test(msg)) {
+        showFailToast('本端有未结束通话，请稍后再试')
+      } else {
+        showFailToast('对方忙线中')
+      }
     } else if (!(e instanceof ApiError)) {
       showFailToast(e instanceof Error ? e.message : '发起通话失败')
     } else {

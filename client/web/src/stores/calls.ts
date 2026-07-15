@@ -39,7 +39,7 @@ export const useCallsStore = defineStore('calls', () => {
   /** Offers/answers/candidates that arrive before CallPeer is ready */
   let earlyOffer: string | null = null
   let earlyAnswer: string | null = null
-  const earlyCandidates: Array<{ candidate: string; mid?: string }> = []
+  const earlyCandidates: Array<{ candidate: string; mid?: string; mlineIndex?: number }> = []
 
   const auth = () => useAuthStore()
 
@@ -102,10 +102,11 @@ export const useCallsStore = defineStore('calls', () => {
 
     mediaStarting = true
     phase.value = 'connecting'
+    error.value = null
     try {
       const rtc = await getRtcConfig(call.value.id)
       const isCaller = myRole.value === 'caller'
-      peer = new CallPeer(call.value.id, peerUser.user_id, isCaller, {
+      const nextPeer = new CallPeer(call.value.id, peerUser.user_id, isCaller, {
         onRemoteStream: (stream) => {
           remoteStream.value = stream
         },
@@ -114,11 +115,19 @@ export const useCallsStore = defineStore('calls', () => {
             phase.value = 'connected'
           }
         },
+        onWarning: (message) => {
+          error.value = message
+        },
         onError: (err) => {
           error.value = err.message
+          // Only fatal errors (ICE / send failure) end the call
+          void endServerCallAndReset()
         },
       })
-      await peer.start(rtc.ice_servers, call.value.type)
+      // Do not publish `peer` until RTCPeerConnection exists inside start().
+      // Otherwise inbound offers hit handleOffer while pc is still null.
+      await nextPeer.start(rtc.ice_servers, call.value.type)
+      peer = nextPeer
       localStream.value = peer.getLocalStream()
 
       if (earlyOffer && !isCaller) {
@@ -132,14 +141,46 @@ export const useCallsStore = defineStore('calls', () => {
         await peer.handleAnswer(sdp)
       }
       for (const c of earlyCandidates.splice(0)) {
-        await peer.handleCandidate(c.candidate, c.mid)
+        await peer.handleCandidate(c.candidate, c.mid, c.mlineIndex)
       }
-      // Stay on `connecting` until ICE reports connected via onConnectionState.
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
-      // Keep call open so user can hang up; media failed
+      peer?.stop()
+      peer = null
+      localStream.value = null
+      remoteStream.value = null
+      // Media失败时必须结束服务端通话，否则双方会一直 busy
+      await endServerCallAndReset()
     } finally {
       mediaStarting = false
+    }
+  }
+
+  /** 结束服务端占线状态并清空本地通话 UI */
+  async function endServerCallAndReset(): Promise<void> {
+    const current = call.value
+    if (!current) {
+      resetAll()
+      return
+    }
+    const id = current.id
+    const status = current.status
+    const role = myRole.value
+    try {
+      if (status === 'ringing' || phase.value === 'outgoing' || phase.value === 'incoming') {
+        if (role === 'caller') {
+          await cancelCall(id)
+        } else {
+          await rejectCall(id)
+        }
+      } else {
+        const result = await hangupCall(id)
+        applyCallRecord(result)
+      }
+    } catch {
+      // 忽略网络错误，本地必须清零
+    } finally {
+      resetAll()
     }
   }
 
@@ -284,7 +325,8 @@ export const useCallsStore = defineStore('calls', () => {
     const sdp = data.sdp as string | undefined
     if (!callId || !sdp || call.value?.id !== callId) return
 
-    if (!peer || mediaStarting) {
+    // Queue until CallPeer.start() has created RTCPeerConnection
+    if (!peer || mediaStarting || !peer.isReady()) {
       earlyOffer = sdp
       return
     }
@@ -299,7 +341,7 @@ export const useCallsStore = defineStore('calls', () => {
     const callId = data.call_id as string | undefined
     const sdp = data.sdp as string | undefined
     if (!callId || !sdp || call.value?.id !== callId) return
-    if (!peer || mediaStarting) {
+    if (!peer || mediaStarting || !peer.isReady()) {
       earlyAnswer = sdp
       return
     }
@@ -315,12 +357,18 @@ export const useCallsStore = defineStore('calls', () => {
     const candidate = data.candidate as string | undefined
     if (!callId || !candidate || call.value?.id !== callId) return
     const mid = data.mid as string | undefined
+    const mlineIndex =
+      typeof data.mline_index === 'number'
+        ? data.mline_index
+        : typeof data.sdpMLineIndex === 'number'
+          ? data.sdpMLineIndex
+          : undefined
 
-    if (!peer || mediaStarting) {
-      earlyCandidates.push({ candidate, mid })
+    if (!peer || mediaStarting || !peer.isReady()) {
+      earlyCandidates.push({ candidate, mid, mlineIndex })
       return
     }
-    await peer.handleCandidate(candidate, mid)
+    await peer.handleCandidate(candidate, mid, mlineIndex)
   }
 
   function toggleMute(): void {

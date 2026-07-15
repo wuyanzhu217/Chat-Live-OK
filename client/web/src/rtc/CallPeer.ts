@@ -4,7 +4,10 @@ import { realtimeClient } from '@/ws/RealtimeClient'
 export type CallPeerHandlers = {
   onRemoteStream?: (stream: MediaStream) => void
   onConnectionState?: (state: RTCPeerConnectionState) => void
+  /** Fatal: should end the call */
   onError?: (err: Error) => void
+  /** Non-fatal: e.g. camera unavailable, continued as audio */
+  onWarning?: (message: string) => void
 }
 
 /**
@@ -16,7 +19,8 @@ export class CallPeer {
   private localStream: MediaStream | null = null
   private remoteStream: MediaStream | null = null
   private remoteDescSet = false
-  private pendingCandidates: Array<{ candidate: string; mid?: string }> = []
+  private makingAnswer = false
+  private pendingCandidates: Array<{ candidate: string; mid?: string; mlineIndex?: number }> = []
   private closed = false
 
   constructor(
@@ -34,29 +38,30 @@ export class CallPeer {
     return this.remoteStream
   }
 
+  /** True after start() has created RTCPeerConnection. */
+  isReady(): boolean {
+    return !!this.pc && !this.closed
+  }
+
   async start(iceServers: IceServerConfig[], type: CallType): Promise<void> {
     if (this.closed) return
 
-    const constraints: MediaStreamConstraints = {
-      audio: true,
-      video:
-        type === 'video'
-          ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
-          : false,
-    }
-    this.localStream = await navigator.mediaDevices.getUserMedia(constraints)
+    this.localStream = await this.acquireLocalMedia(type)
 
     this.pc = new RTCPeerConnection({ iceServers })
     this.remoteStream = new MediaStream()
 
     this.pc.ontrack = (ev) => {
-      ev.streams[0]?.getTracks().forEach((t) => {
-        this.remoteStream!.addTrack(t)
-      })
-      if (!ev.streams[0]) {
-        this.remoteStream!.addTrack(ev.track)
+      const stream = this.remoteStream
+      if (!stream) return
+      // Prefer the inbound track; avoid re-adding duplicates from streams[0]
+      if (!stream.getTracks().some((t) => t.id === ev.track.id)) {
+        stream.addTrack(ev.track)
       }
-      this.handlers.onRemoteStream?.(this.remoteStream!)
+      // New MediaStream reference so Vue shallowRef watchers fire on each track
+      const next = new MediaStream(stream.getTracks())
+      this.remoteStream = next
+      this.handlers.onRemoteStream?.(next)
     }
 
     this.pc.onicecandidate = (ev) => {
@@ -66,6 +71,10 @@ export class CallPeer {
         to_user_id: this.peerUserId,
         candidate: ev.candidate.candidate,
         mid: ev.candidate.sdpMid ?? undefined,
+        mline_index:
+          ev.candidate.sdpMLineIndex === null || ev.candidate.sdpMLineIndex === undefined
+            ? undefined
+            : ev.candidate.sdpMLineIndex,
       })
     }
 
@@ -84,11 +93,52 @@ export class CallPeer {
     if (this.isCaller) {
       const offer = await this.pc.createOffer()
       await this.pc.setLocalDescription(offer)
-      realtimeClient.send('webrtc.offer', {
+      const ok = realtimeClient.send('webrtc.offer', {
         call_id: this.callId,
         to_user_id: this.peerUserId,
         sdp: offer.sdp ?? '',
       })
+      if (!ok) {
+        this.handlers.onError?.(new Error('发送 offer 失败（WS 未连接）'))
+      }
+    }
+  }
+
+  /**
+   * Acquire mic/camera. Video call falls back to audio-only if camera is busy
+   * or unavailable, so signaling (answer) can still complete.
+   */
+  private async acquireLocalMedia(type: CallType): Promise<MediaStream> {
+    if (type !== 'video') {
+      return navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    }
+
+    const attempts: MediaStreamConstraints[] = [
+      { audio: true, video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } },
+      { audio: true, video: true },
+      { audio: true, video: { width: { ideal: 640 }, height: { ideal: 480 } } },
+    ]
+
+    let lastError: unknown
+    for (const constraints of attempts) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints)
+      } catch (e) {
+        lastError = e
+      }
+    }
+
+    // Camera unavailable — continue with audio; do NOT treat as fatal hangup
+    try {
+      const audioOnly = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      this.handlers.onWarning?.(
+        '摄像头无法打开（可能被占用），已降级为语音通话',
+      )
+      return audioOnly
+    } catch {
+      const msg =
+        lastError instanceof Error ? lastError.message : 'Could not start media devices'
+      throw new Error(msg)
     }
   }
 
@@ -96,35 +146,49 @@ export class CallPeer {
     if (!this.pc || this.closed) {
       throw new Error('PeerConnection not ready')
     }
-    await this.pc.setRemoteDescription({ type: 'offer', sdp })
-    this.remoteDescSet = true
-    await this.flushCandidates()
-    const answer = await this.pc.createAnswer()
-    await this.pc.setLocalDescription(answer)
-    realtimeClient.send('webrtc.answer', {
-      call_id: this.callId,
-      to_user_id: this.peerUserId,
-      sdp: answer.sdp ?? '',
-    })
+    if (this.makingAnswer) return
+    this.makingAnswer = true
+    try {
+      await this.pc.setRemoteDescription({ type: 'offer', sdp })
+      this.remoteDescSet = true
+      await this.flushCandidates()
+      const answer = await this.pc.createAnswer()
+      await this.pc.setLocalDescription(answer)
+      const ok = realtimeClient.send('webrtc.answer', {
+        call_id: this.callId,
+        to_user_id: this.peerUserId,
+        sdp: answer.sdp ?? '',
+      })
+      if (!ok) {
+        throw new Error('发送 answer 失败（WS 未连接）')
+      }
+    } finally {
+      this.makingAnswer = false
+    }
   }
 
   async handleAnswer(sdp: string): Promise<void> {
     if (!this.pc || this.closed) return
+    if (this.pc.signalingState !== 'have-local-offer' && this.pc.signalingState !== 'have-remote-offer') {
+      // Already stable or unexpected — ignore duplicate answers
+      if (this.pc.remoteDescription) return
+    }
     await this.pc.setRemoteDescription({ type: 'answer', sdp })
     this.remoteDescSet = true
     await this.flushCandidates()
   }
 
-  async handleCandidate(candidate: string, mid?: string): Promise<void> {
+  async handleCandidate(candidate: string, mid?: string, mlineIndex?: number): Promise<void> {
     if (!candidate) return
     if (!this.pc || !this.remoteDescSet) {
-      this.pendingCandidates.push({ candidate, mid })
+      this.pendingCandidates.push({ candidate, mid, mlineIndex })
       return
     }
     try {
       await this.pc.addIceCandidate({
         candidate,
-        sdpMid: mid ?? null,
+        sdpMid: mid ?? undefined,
+        sdpMLineIndex: mlineIndex,
       })
     } catch (e) {
       console.warn('[CallPeer] addIceCandidate failed', e)
@@ -138,7 +202,8 @@ export class CallPeer {
       try {
         await this.pc.addIceCandidate({
           candidate: c.candidate,
-          sdpMid: c.mid ?? null,
+          sdpMid: c.mid ?? undefined,
+          sdpMLineIndex: c.mlineIndex,
         })
       } catch (e) {
         console.warn('[CallPeer] flush candidate failed', e)
@@ -172,5 +237,6 @@ export class CallPeer {
     this.localStream = null
     this.remoteStream = null
     this.remoteDescSet = false
+    this.makingAnswer = false
   }
 }
