@@ -4,7 +4,7 @@
 #   API:  http://127.0.0.1:8888/v1/  (when chatlive is wired)
 
 upstream chatlive_http {
-    server 172.19.0.1:8088;
+    server chatlive:8088;
 }
 
 upstream srs_http {
@@ -48,7 +48,7 @@ server {
     }
 
     location /v1/ws {
-        proxy_pass http://172.19.0.1:8089/v1/ws;
+        proxy_pass http://chatlive:8089/v1/ws;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -57,7 +57,7 @@ server {
     }
 
     location /health-chatlive {
-        proxy_pass http://172.19.0.1:8088/health;
+        proxy_pass http://chatlive:8088/health;
         proxy_http_version 1.1;
     }
 

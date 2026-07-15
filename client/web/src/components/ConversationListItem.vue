@@ -15,8 +15,12 @@ const peer = computed(() => {
 const preview = computed(() => {
   const lm = props.conversation.last_message
   if (!lm) return '暂无消息'
+  if (lm.type === 'call_record') return lm.content || '[通话]'
+  if (lm.type === 'image') {
+    const prefix = lm.sender_id === auth.userId ? '我: ' : ''
+    return `${prefix}[图片]`
+  }
   const prefix = lm.sender_id === auth.userId ? '我: ' : ''
-  if (lm.type === 'image') return `${prefix}[图片]`
   return `${prefix}${lm.content}`
 })
 </script>

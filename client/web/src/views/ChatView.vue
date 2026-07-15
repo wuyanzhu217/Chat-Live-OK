@@ -1,17 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { NavBar, Loading, Icon, showFailToast, showToast } from 'vant'
 import { useRoute } from 'vue-router'
-import { NavBar, Loading } from 'vant'
 import { useConversationsStore } from '@/stores/conversations'
 import { useMessagesStore } from '@/stores/messages'
 import { useAuthStore } from '@/stores/auth'
 import { useFriendsStore } from '@/stores/friends'
+import { useCallsStore } from '@/stores/calls'
 import { markConversationRead } from '@/api/conversations'
+import { ApiError } from '@/types/api'
 import MessageBubble from '@/components/MessageBubble.vue'
 import ChatInput from '@/components/ChatInput.vue'
 import TypingIndicator from '@/components/TypingIndicator.vue'
 import PresenceBadge from '@/components/PresenceBadge.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
+import type { CallType } from '@/types/call'
 
 const route = useRoute()
 const convId = computed(() => route.params.convId as string)
@@ -19,6 +22,7 @@ const conversations = useConversationsStore()
 const messages = useMessagesStore()
 const auth = useAuthStore()
 const friends = useFriendsStore()
+const calls = useCallsStore()
 const loading = ref(true)
 
 const conv = computed(() => conversations.items.find((c) => c.id === convId.value))
@@ -52,18 +56,55 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+async function startCall(type: CallType): Promise<void> {
+  if (!peer.value?.user_id) {
+    showFailToast('无法识别对方')
+    return
+  }
+  if (calls.isActive) {
+    showToast('当前已在通话中')
+    return
+  }
+  try {
+    await calls.initiate(peer.value.user_id, type, convId.value)
+  } catch (e) {
+    if (e instanceof ApiError && e.code === 4002) {
+      showFailToast('对方忙线中')
+    } else if (!(e instanceof ApiError)) {
+      showFailToast(e instanceof Error ? e.message : '发起通话失败')
+    } else {
+      showFailToast(e.message || '发起通话失败')
+    }
+  }
+}
 </script>
 
 <template>
   <div class="chat">
-    <NavBar :title="peer?.nickname || '聊天'" left-arrow @click-left="$router.back()" fixed placeholder />
+    <NavBar :title="peer?.nickname || '聊天'" left-arrow @click-left="$router.back()" fixed placeholder>
+      <template #right>
+        <div class="chat__actions">
+          <Icon name="phone-o" size="20" class="chat__action" @click="startCall('audio')" />
+          <Icon name="video-o" size="20" class="chat__action" @click="startCall('video')" />
+        </div>
+      </template>
+    </NavBar>
     <div v-if="peer" class="chat__presence">
       <UserAvatar :name="peer.nickname" :avatar-url="peer.avatar_url" :size="20" />
       <PresenceBadge :presence="peerPresence" class="chat__presence-dot" />
     </div>
     <Loading v-if="loading" class="chat__loading" />
     <div v-else class="chat__messages">
-      <div v-for="msg in list" :key="msg.id" class="chat__row" :class="{ 'chat__row--self': msg.sender_id === auth.userId }">
+      <div
+        v-for="msg in list"
+        :key="msg.id"
+        class="chat__row"
+        :class="{
+          'chat__row--self': msg.sender_id === auth.userId,
+          'chat__row--center': msg.type === 'call_record' || msg.type === 'system',
+        }"
+      >
         <MessageBubble :message="msg" />
       </div>
     </div>
@@ -78,6 +119,16 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   background: #ededed;
+}
+.chat__actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-right: 4px;
+}
+.chat__action {
+  cursor: pointer;
+  color: #323233;
 }
 .chat__presence {
   position: relative;
@@ -100,5 +151,8 @@ onMounted(async () => {
 }
 .chat__row--self {
   justify-content: flex-end;
+}
+.chat__row--center {
+  justify-content: center;
 }
 </style>

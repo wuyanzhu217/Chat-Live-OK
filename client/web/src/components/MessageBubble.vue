@@ -19,7 +19,10 @@ function openPreview(url: string): void {
 <template>
   <div
     class="bubble"
-    :class="{ 'bubble--self': message.sender_id === auth.userId }"
+    :class="{
+      'bubble--self': message.sender_id === auth.userId && message.type !== 'call_record' && message.type !== 'system',
+      'bubble--system': message.type === 'call_record' || message.type === 'system',
+    }"
   >
     <template v-if="message.type === 'text'">
       <p class="bubble__text">{{ message.content }}</p>
@@ -32,6 +35,12 @@ function openPreview(url: string): void {
         @click="openPreview(message.media_url!)"
         @error="imageError = true"
       />
+    </template>
+    <template v-else-if="message.type === 'call_record'">
+      <p class="bubble__system-text">{{ message.content || '通话记录' }}</p>
+    </template>
+    <template v-else-if="message.type === 'system'">
+      <p class="bubble__system-text">{{ message.content }}</p>
     </template>
     <template v-else>
       <p class="bubble__text">[不支持的消息]</p>
@@ -50,10 +59,22 @@ function openPreview(url: string): void {
 .bubble--self {
   background: #95ec69;
 }
+.bubble--system {
+  max-width: 90%;
+  background: transparent;
+  box-shadow: none;
+  padding: 4px 8px;
+}
 .bubble__text {
   margin: 0;
   word-break: break-word;
   white-space: pre-wrap;
+}
+.bubble__system-text {
+  margin: 0;
+  font-size: 12px;
+  color: #999;
+  text-align: center;
 }
 .bubble__image {
   max-width: 200px;

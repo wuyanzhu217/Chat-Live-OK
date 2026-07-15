@@ -49,7 +49,9 @@ export const useConversationsStore = defineStore('conversations', () => {
     conv.last_message = {
       id: msg.id,
       type: msg.type,
-      content: msg.content || (msg.type === 'image' ? '[图片]' : ''),
+      content:
+        msg.content ||
+        (msg.type === 'image' ? '[图片]' : msg.type === 'call_record' ? '[通话]' : ''),
       sender_id: msg.sender_id,
       created_at: msg.created_at,
     }

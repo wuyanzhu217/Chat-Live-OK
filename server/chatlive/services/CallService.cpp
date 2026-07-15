@@ -1,5 +1,6 @@
 #include "CallService.h"
 #include "ConversationService.h"
+#include "MessageService.h"
 #include "TurnCredentialService.h"
 #include "../ws/WsHub.h"
 
@@ -14,11 +15,34 @@ namespace {
 
 std::string formatDuration(int seconds)
 {
+    if (seconds < 0) {
+        seconds = 0;
+    }
     const int mins = seconds / 60;
     const int secs = seconds % 60;
     std::ostringstream oss;
     oss << mins << ":" << (secs < 10 ? "0" : "") << secs;
     return oss.str();
+}
+
+std::string formatCallRecordContent(const std::string& callType,
+                                    const std::string& outcome,
+                                    int durationSec)
+{
+    const std::string kind = (callType == "video") ? "视频通话" : "语音通话";
+    if (outcome == "ended") {
+        return kind + " 已接通 " + formatDuration(durationSec);
+    }
+    if (outcome == "rejected") {
+        return kind + " 未接通 · 已拒绝";
+    }
+    if (outcome == "cancelled") {
+        return kind + " 未接通 · 已取消";
+    }
+    if (outcome == "missed") {
+        return kind + " 未接通 · 未接听";
+    }
+    return kind + " 未接通";
 }
 
 } // namespace
@@ -334,20 +358,28 @@ void CallService::transitionStatus(const drogon::orm::DbClientPtr& db,
 
             db->execSqlAsync(
                 sql,
-                [db, callId, toStatus, onSuccess, onError](const drogon::orm::Result& r2) {
+                [db, callId, userId, toStatus, onSuccess, onError](const drogon::orm::Result& r2) {
                     if (r2.size() == 0) {
                         onError("Failed to update call");
                         return;
                     }
                     loadParticipants(
                         db, callId, r2[0],
-                        [callId, toStatus, onSuccess](const Json::Value& call) {
+                        [db, callId, userId, toStatus, onSuccess](const Json::Value& call) {
                             std::vector<std::string> userIds;
                             for (const auto& p : call["participants"]) {
                                 userIds.push_back(p["user_id"].asString());
                             }
                             pushCallState(callId, toStatus, userIds);
-                            onSuccess(call);
+
+                            if (toStatus == "rejected" || toStatus == "cancelled") {
+                                emitCallRecord(db, callId, userId, toStatus,
+                                               [call, onSuccess](const Json::Value&) {
+                                                   onSuccess(call);
+                                               });
+                            } else {
+                                onSuccess(call);
+                            }
                         },
                         onError);
                 },
@@ -392,38 +424,105 @@ void CallService::cancel(const drogon::orm::DbClientPtr& db,
 void CallService::insertCallRecordMessage(const drogon::orm::DbClientPtr& db,
                                           const std::string& convId,
                                           const std::string& senderId,
-                                          const std::string& type,
+                                          const std::string& callType,
+                                          const std::string& outcome,
                                           int durationSec,
                                           std::function<void(const Json::Value& msg)> onSuccess,
                                           ErrorCallback onError)
 {
-    const std::string label = (type == "video") ? "Video call" : "Voice call";
-    const std::string content = label + " · " + formatDuration(durationSec);
+    const std::string content = formatCallRecordContent(callType, outcome, durationSec);
 
     db->execSqlAsync(
         "INSERT INTO messages (conversation_id, sender_id, type, content) "
         "VALUES ($1, $2, 'call_record', $3) "
         "RETURNING id, conversation_id, sender_id, type, content, media_url, thumbnail_url, "
         "status, client_msg_id, created_at",
-        [onSuccess](const drogon::orm::Result& r) {
+        [db, convId, senderId, onSuccess, onError](const drogon::orm::Result& r) {
             if (r.size() == 0) {
                 onSuccess(Json::Value());
                 return;
             }
-            Json::Value msg;
-            const auto& row = r[0];
-            msg["id"] = row["id"].as<std::string>();
-            msg["conversation_id"] = row["conversation_id"].as<std::string>();
-            msg["sender_id"] = row["sender_id"].as<std::string>();
-            msg["type"] = row["type"].as<std::string>();
-            msg["content"] = row["content"].as<std::string>();
-            msg["created_at"] = row["created_at"].as<std::string>();
-            onSuccess(msg);
+            const auto row = r[0];
+            db->execSqlAsync(
+                "UPDATE conversations SET updated_at = NOW() WHERE id = $1",
+                [db, row, senderId, onSuccess, onError](const drogon::orm::Result&) {
+                    db->execSqlAsync(
+                        "SELECT username, nickname, avatar_url FROM users WHERE id = $1",
+                        [db, row, senderId, onSuccess](const drogon::orm::Result& userR) {
+                            Json::Value sender;
+                            if (userR.size() > 0) {
+                                sender["username"] = userR[0]["username"].as<std::string>();
+                                sender["nickname"] = userR[0]["nickname"].as<std::string>();
+                                sender["avatar_url"] = userR[0]["avatar_url"].isNull()
+                                    ? Json::Value::null
+                                    : userR[0]["avatar_url"].as<std::string>();
+                            }
+                            Json::Value msg = MessageService::rowToMessage(row, sender);
+                            const std::string convId = msg["conversation_id"].asString();
+                            ConversationService::getMemberIds(
+                                db, convId,
+                                [msg](const std::vector<std::string>& memberIds) {
+                                    WsHub::instance().pushToUsers(memberIds, "message.new", msg);
+                                },
+                                [](const std::string& err) {
+                                    LOG_WARN << "[Call] push call_record failed: " << err;
+                                });
+                            onSuccess(msg);
+                        },
+                        [onError](const drogon::orm::DrogonDbException& e) {
+                            onError(std::string("DB error: ") + e.base().what());
+                        },
+                        senderId);
+                },
+                [onError](const drogon::orm::DrogonDbException& e) {
+                    onError(std::string("DB error: ") + e.base().what());
+                },
+                convId);
         },
         [onError](const drogon::orm::DrogonDbException& e) {
             onError(std::string("DB error: ") + e.base().what());
         },
         convId, senderId, content);
+}
+
+void CallService::emitCallRecord(const drogon::orm::DbClientPtr& db,
+                                 const std::string& callId,
+                                 const std::string& actorUserId,
+                                 const std::string& outcome,
+                                 std::function<void(const Json::Value& msg)> onDone)
+{
+    db->execSqlAsync(
+        "SELECT type, conversation_id, started_at, ended_at, "
+        "CASE WHEN started_at IS NULL THEN 0 "
+        "ELSE GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(ended_at, NOW()) - started_at))::int) "
+        "END AS dur "
+        "FROM calls WHERE id = $1",
+        [db, actorUserId, outcome, onDone](const drogon::orm::Result& r) {
+            if (r.size() == 0) {
+                onDone(Json::Value());
+                return;
+            }
+            const auto& row = r[0];
+            if (row["conversation_id"].isNull()) {
+                onDone(Json::Value());
+                return;
+            }
+            const std::string convId = row["conversation_id"].as<std::string>();
+            const std::string callType = row["type"].as<std::string>();
+            const int durationSec = row["dur"].as<int>();
+            insertCallRecordMessage(
+                db, convId, actorUserId, callType, outcome, durationSec,
+                onDone,
+                [onDone](const std::string& err) {
+                    LOG_WARN << "[Call] emitCallRecord insert failed: " << err;
+                    onDone(Json::Value());
+                });
+        },
+        [onDone](const drogon::orm::DrogonDbException& e) {
+            LOG_WARN << "[Call] emitCallRecord: " << e.base().what();
+            onDone(Json::Value());
+        },
+        callId);
 }
 
 void CallService::hangup(const drogon::orm::DbClientPtr& db,
@@ -448,70 +547,58 @@ void CallService::hangup(const drogon::orm::DbClientPtr& db,
                 return;
             }
 
-            const std::string callType = r[0]["type"].as<std::string>();
-            const std::string convId = r[0]["conversation_id"].isNull()
-                ? ""
-                : r[0]["conversation_id"].as<std::string>();
+            const std::string role = r[0]["role"].as<std::string>();
+            // Ringing hangup maps to cancel/reject semantics for the record.
+            std::string outcome = "ended";
+            std::string nextStatus = "ended";
+            if (status == "ringing") {
+                if (role == "caller") {
+                    outcome = "cancelled";
+                    nextStatus = "cancelled";
+                } else {
+                    outcome = "rejected";
+                    nextStatus = "rejected";
+                }
+            }
 
             db->execSqlAsync(
-                "UPDATE calls SET status = 'ended', ended_at = NOW() WHERE id = $1 "
+                "UPDATE calls SET status = $1, ended_at = NOW() WHERE id = $2 "
                 "RETURNING id, mode, type, status, conversation_id, room_id, started_at, ended_at, created_at",
-                [db, callId, callType, convId, userId, onSuccess, onError](const drogon::orm::Result& r2) {
+                [db, callId, userId, outcome, onSuccess, onError](const drogon::orm::Result& r2) {
                     if (r2.size() == 0) {
                         onError("Failed to hang up");
                         return;
                     }
-                    const auto& callRow = r2[0];
+                    const auto callRow = r2[0];
 
-                    db->execSqlAsync(
-                        "SELECT GREATEST(0, EXTRACT(EPOCH FROM (ended_at - started_at))::int) AS dur "
-                        "FROM calls WHERE id = $1",
-                        [db, callId, callRow, callType, convId, userId, onSuccess, onError](
-                            const drogon::orm::Result& durR) {
-                            int durationSec = 0;
-                            if (durR.size() > 0) {
-                                durationSec = durR[0]["dur"].as<int>();
-                            }
+                    auto finish = [db, callId, callRow, outcome, userId, onSuccess, onError](
+                                      const Json::Value& recordMsg) {
+                        loadParticipants(
+                            db, callId, callRow,
+                            [callId, outcome, recordMsg, onSuccess](const Json::Value& call) {
+                                std::vector<std::string> userIds;
+                                for (const auto& p : call["participants"]) {
+                                    userIds.push_back(p["user_id"].asString());
+                                }
+                                pushCallState(callId, call["status"].asString(), userIds);
 
-                            auto finish = [db, callId, callRow, onSuccess, onError](const Json::Value& recordMsg) {
-                                loadParticipants(
-                                    db, callId, callRow,
-                                    [callId, recordMsg, onSuccess](const Json::Value& call) {
-                                        std::vector<std::string> userIds;
-                                        for (const auto& p : call["participants"]) {
-                                            userIds.push_back(p["user_id"].asString());
-                                        }
-                                        pushCallState(callId, "ended", userIds);
+                                Json::Value result;
+                                result["call"] = call;
+                                if (!recordMsg.isNull() && recordMsg.isObject() &&
+                                    recordMsg.isMember("id")) {
+                                    result["call_record_message"] = recordMsg;
+                                }
+                                onSuccess(result);
+                            },
+                            onError);
+                    };
 
-                                        Json::Value result;
-                                        result["call"] = call;
-                                        if (!recordMsg.isNull()) {
-                                            result["call_record_message"] = recordMsg;
-                                        }
-                                        onSuccess(result);
-                                    },
-                                    onError);
-                            };
-
-                            if (convId.empty()) {
-                                finish(Json::Value());
-                                return;
-                            }
-
-                            insertCallRecordMessage(
-                                db, convId, userId, callType, durationSec,
-                                finish,
-                                [finish](const std::string&) { finish(Json::Value()); });
-                        },
-                        [onError](const drogon::orm::DrogonDbException& e) {
-                            onError(std::string("DB error: ") + e.base().what());
-                        },
-                        callId);
+                    emitCallRecord(db, callId, userId, outcome, finish);
                 },
                 [onError](const drogon::orm::DrogonDbException& e) {
                     onError(std::string("DB error: ") + e.base().what());
                 },
-                callId);
+                nextStatus, callId);
         },
         [onError](const drogon::orm::DrogonDbException& e) {
             onError(std::string("DB error: ") + e.base().what());
@@ -608,12 +695,20 @@ void CallService::expireRingingCalls(const drogon::orm::DbClientPtr& db)
                 const std::string callId = row["id"].as<std::string>();
                 loadCall(
                     db, callId,
-                    [callId](const Json::Value& call) {
+                    [db, callId](const Json::Value& call) {
                         std::vector<std::string> userIds;
+                        std::string callerId;
                         for (const auto& p : call["participants"]) {
                             userIds.push_back(p["user_id"].asString());
+                            if (p["role"].asString() == "caller") {
+                                callerId = p["user_id"].asString();
+                            }
                         }
                         pushCallState(callId, "missed", userIds, "timeout");
+                        if (!callerId.empty()) {
+                            emitCallRecord(db, callId, callerId, "missed",
+                                           [](const Json::Value&) {});
+                        }
                     },
                     [](const std::string& err) {
                         LOG_WARN << "[Call] expireRingingCalls load failed: " << err;

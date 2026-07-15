@@ -4,8 +4,10 @@ import { useMessagesStore } from '@/stores/messages'
 import { useFriendsStore } from '@/stores/friends'
 import { useAuthStore } from '@/stores/auth'
 import { useRealtimeStore } from '@/stores/realtime'
+import { useCallsStore } from '@/stores/calls'
 import type { Message } from '@/types/message'
 import type { Presence } from '@/types/friend'
+import type { Call } from '@/types/call'
 
 let bound = false
 
@@ -19,6 +21,7 @@ export function bindRealtimeStores(): void {
   const messages = useMessagesStore()
   const friends = useFriendsStore()
   const auth = useAuthStore()
+  const calls = useCallsStore()
 
   realtimeClient.on('message.new', (data) => {
     const msg = data as unknown as Message
@@ -26,7 +29,9 @@ export function bindRealtimeStores(): void {
     messages.appendMessage(msg.conversation_id, msg)
     messages.clearTypingIfUser(msg.conversation_id, msg.sender_id)
     conversations.updateLastMessage(msg.conversation_id, msg)
-    conversations.bumpUnreadIfNeeded(msg.conversation_id, msg.sender_id)
+    if (msg.sender_id !== auth.userId) {
+      conversations.bumpUnreadIfNeeded(msg.conversation_id, msg.sender_id)
+    }
   })
 
   realtimeClient.on('message.read', (data) => {
@@ -60,5 +65,31 @@ export function bindRealtimeStores(): void {
     const userId = data.user_id as string | undefined
     if (!convId || !userId || userId === auth.userId) return
     messages.setTyping(convId, userId)
+  })
+
+  realtimeClient.on('call.incoming', (data) => {
+    const incoming = data.call as Call | undefined
+    if (incoming?.id) {
+      calls.onIncoming(incoming)
+    }
+  })
+
+  realtimeClient.on('call.state', (data) => {
+    const callId = data.call_id as string | undefined
+    const status = data.status as string | undefined
+    if (!callId || !status) return
+    void calls.onCallState(callId, status, data.reason as string | undefined)
+  })
+
+  realtimeClient.on('webrtc.offer', (data) => {
+    void calls.onWebRtcOffer(data)
+  })
+
+  realtimeClient.on('webrtc.answer', (data) => {
+    void calls.onWebRtcAnswer(data)
+  })
+
+  realtimeClient.on('webrtc.candidate', (data) => {
+    void calls.onWebRtcCandidate(data)
   })
 }

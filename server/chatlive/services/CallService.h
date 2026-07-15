@@ -121,10 +121,18 @@ private:
     static void insertCallRecordMessage(const drogon::orm::DbClientPtr& db,
                                         const std::string& convId,
                                         const std::string& senderId,
-                                        const std::string& type,
+                                        const std::string& callType,
+                                        const std::string& outcome,
                                         int durationSec,
                                         std::function<void(const Json::Value& msg)> onSuccess,
                                         ErrorCallback onError);
+
+    /** Insert call_record, bump conversation, push message.new to all members. */
+    static void emitCallRecord(const drogon::orm::DbClientPtr& db,
+                               const std::string& callId,
+                               const std::string& actorUserId,
+                               const std::string& outcome,
+                               std::function<void(const Json::Value& msg)> onDone);
 };
 
 } // namespace chatlive
