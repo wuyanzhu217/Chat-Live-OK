@@ -8,7 +8,6 @@ import {
   rejectCall,
   getRtcConfig,
 } from '@/api/calls'
-import { ApiError } from '@/types/api'
 import type { Call, CallPhase, CallType } from '@/types/call'
 import { CallPeer } from '@/rtc/CallPeer'
 import { useAuthStore } from '@/stores/auth'
@@ -79,6 +78,20 @@ export const useCallsStore = defineStore('calls', () => {
     busy.value = false
   }
 
+  function clearError(): void {
+    error.value = null
+  }
+
+  /** 短暂提示后自动清空，避免状态栏/Toast 残留 */
+  function flashError(message: string, ms = 2500): void {
+    error.value = message
+    window.setTimeout(() => {
+      if (error.value === message) {
+        error.value = null
+      }
+    }, ms)
+  }
+
   function applyCallRecord(result: Awaited<ReturnType<typeof hangupCall>>): void {
     const msg = result.call_record_message
     if (!msg?.conversation_id) return
@@ -118,10 +131,10 @@ export const useCallsStore = defineStore('calls', () => {
           }
         },
         onWarning: (message) => {
-          error.value = message
+          flashError(message)
         },
         onError: (err) => {
-          error.value = err.message
+          flashError(err.message)
           // Only fatal errors (ICE / send failure) end the call
           void endServerCallAndReset()
         },
@@ -196,7 +209,7 @@ export const useCallsStore = defineStore('calls', () => {
     conversationId?: string,
   ): Promise<void> {
     if (phase.value !== 'idle') {
-      error.value = '已在通话中'
+      flashError('已在通话中')
       return
     }
     error.value = null
@@ -210,11 +223,7 @@ export const useCallsStore = defineStore('calls', () => {
       call.value = created
       phase.value = 'outgoing'
     } catch (e) {
-      if (e instanceof ApiError && e.code === 4002) {
-        error.value = '对方忙线中'
-      } else {
-        error.value = e instanceof Error ? e.message : String(e)
-      }
+      // 忙线等由 ChatView 弹 Toast；此处不写 error，避免与 Overlay 重复且清不掉
       resetAll()
       throw e
     } finally {
@@ -415,5 +424,6 @@ export const useCallsStore = defineStore('calls', () => {
     toggleMute,
     toggleCamera,
     resetAll,
+    clearError,
   }
 })

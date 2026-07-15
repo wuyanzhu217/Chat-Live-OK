@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NavBar, Loading, Icon, showFailToast, showToast } from 'vant'
+import { NavBar, Loading, Icon, showFailToast, showToast, closeToast } from 'vant'
 import { useRoute } from 'vue-router'
 import { useConversationsStore } from '@/stores/conversations'
 import { useMessagesStore } from '@/stores/messages'
@@ -58,12 +58,14 @@ onMounted(async () => {
 })
 
 async function startCall(type: CallType): Promise<void> {
+  closeToast()
+  calls.clearError()
   if (!peer.value?.user_id) {
-    showFailToast('无法识别对方')
+    showFailToast({ message: '无法识别对方', duration: 2000 })
     return
   }
   if (calls.isActive) {
-    showToast('当前已在通话中')
+    showToast({ message: '当前已在通话中', duration: 2000 })
     return
   }
   try {
@@ -71,15 +73,17 @@ async function startCall(type: CallType): Promise<void> {
   } catch (e) {
     if (e instanceof ApiError && e.code === 4002) {
       const msg = e.message || ''
-      if (/caller busy/i.test(msg)) {
-        showFailToast('本端有未结束通话，请稍后再试')
-      } else {
-        showFailToast('对方忙线中')
-      }
+      const tip = /caller busy/i.test(msg)
+        ? '本端有未结束通话，请稍后再试'
+        : '对方忙线中'
+      showFailToast({ message: tip, duration: 2000 })
     } else if (!(e instanceof ApiError)) {
-      showFailToast(e instanceof Error ? e.message : '发起通话失败')
+      showFailToast({
+        message: e instanceof Error ? e.message : '发起通话失败',
+        duration: 2500,
+      })
     } else {
-      showFailToast(e.message || '发起通话失败')
+      showFailToast({ message: e.message || '发起通话失败', duration: 2500 })
     }
   }
 }
