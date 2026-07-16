@@ -140,13 +140,17 @@ async function onHangup(): Promise<void> {
             <span v-if="hasRemoteVideo" class="call-pane__badge">实时</span>
           </div>
           <div class="call-pane__frame">
-            <video
-              id="call-remote-video"
-              class="call-pane__video"
-              :class="{ 'call-pane__video--hidden': !(isVideoCall && hasRemoteVideo) }"
-              autoplay
-              playsinline
-            />
+            <div
+              class="call-pane__media call-pane__media--mirror"
+              :class="{ 'call-pane__media--hidden': !(isVideoCall && hasRemoteVideo) }"
+            >
+              <video
+                id="call-remote-video"
+                class="call-pane__video"
+                autoplay
+                playsinline
+              />
+            </div>
             <div
               v-if="!isVideoCall || !hasRemoteVideo"
               class="call-pane__placeholder"
