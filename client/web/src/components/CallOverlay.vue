@@ -2,6 +2,7 @@
 import { computed, nextTick, watch } from 'vue'
 import { Icon, showToast, closeToast } from 'vant'
 import { useCallsStore } from '@/stores/calls'
+import { bindCallVideoElement, primeCallVideoPlayback } from '@/utils/callVideo'
 
 const calls = useCallsStore()
 
@@ -51,24 +52,7 @@ async function bindAndPlay(
   stream: MediaStream | null,
   muted: boolean,
 ): Promise<void> {
-  if (!el) return
-  if (el.srcObject !== stream) {
-    el.srcObject = stream
-  }
-  el.muted = muted
-  if (!stream) return
-  try {
-    await el.play()
-  } catch (e) {
-    console.warn('[CallOverlay] video.play blocked', e)
-    try {
-      el.muted = true
-      await el.play()
-      if (!muted) el.muted = false
-    } catch (e2) {
-      console.warn('[CallOverlay] video.play retry failed', e2)
-    }
-  }
+  await bindCallVideoElement(el, stream, muted)
 }
 
 watch(
@@ -101,7 +85,14 @@ watch(
 )
 
 async function onAccept(): Promise<void> {
+  // iOS: play() must run synchronously in the tap handler before any await.
+  primeCallVideoPlayback()
   await calls.accept()
+  await nextTick()
+  const remote = document.getElementById('call-remote-video') as HTMLVideoElement | null
+  const local = document.getElementById('call-local-video') as HTMLVideoElement | null
+  await bindAndPlay(remote, calls.remoteStream, false)
+  await bindAndPlay(local, calls.localStream, true)
 }
 
 async function onReject(): Promise<void> {
@@ -149,6 +140,7 @@ async function onHangup(): Promise<void> {
                 class="call-pane__video"
                 autoplay
                 playsinline
+                webkit-playsinline
               />
             </div>
             <div
@@ -192,6 +184,7 @@ async function onHangup(): Promise<void> {
                 autoplay
                 muted
                 playsinline
+                webkit-playsinline
               />
             </div>
             <div v-if="!showLocalPane" class="call-pane__placeholder call-pane__placeholder--sm">

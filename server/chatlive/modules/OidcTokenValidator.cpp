@@ -170,14 +170,26 @@ std::optional<std::string> OidcTokenValidator::validate(const std::string& token
         }
 
         auto verifier = jwt::verify().allow_algorithm(jwt::algorithm::rs256(pem));
-        if (!expectedIssuer_.empty()) {
-            verifier.with_issuer(expectedIssuer_);
-        }
         if (!expectedAudience_.empty()) {
             verifier.with_audience(expectedAudience_);
         }
 
         verifier.verify(decoded);
+
+        // Dev: accept any host as long as realm path matches (SSH tunnel / NAT IP).
+        if (!expectedIssuer_.empty()) {
+            const std::string iss = decoded.get_issuer();
+            const auto pos = expectedIssuer_.rfind("/realms/");
+            const std::string realmSuffix =
+                pos != std::string::npos ? expectedIssuer_.substr(pos) : expectedIssuer_;
+            const bool issuerOk =
+                iss == expectedIssuer_ ||
+                (iss.size() >= realmSuffix.size() &&
+                 iss.compare(iss.size() - realmSuffix.size(), realmSuffix.size(), realmSuffix) == 0);
+            if (!issuerOk) {
+                throw std::runtime_error("claim value does not match expected value");
+            }
+        }
         return decoded.get_subject();
     } catch (const std::exception& e) {
         std::cerr << "[OidcTokenValidator] Validation failed: " << e.what() << std::endl;

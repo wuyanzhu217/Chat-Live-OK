@@ -298,6 +298,9 @@ int main()
         {Get, "JwtAuthFilter"});
 
     // ==================== 启动服务器 ====================
+    // Default Drogon limit is 1MB; allow slightly above max image size (5MB).
+    app().setClientMaxBodySize(6 * 1024 * 1024);
+
     app().addListener("0.0.0.0", 8088);
     app().addListener("0.0.0.0", 8089);
 

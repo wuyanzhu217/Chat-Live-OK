@@ -1,0 +1,5 @@
+letsencrypt/
+acme-webroot/*
+!acme-webroot/.gitkeep
+certs/*
+!certs/.gitkeep

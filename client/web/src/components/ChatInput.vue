@@ -5,6 +5,7 @@ import { uploadImage } from '@/api/uploads'
 import { useMessagesStore } from '@/stores/messages'
 import { realtimeClient } from '@/ws/RealtimeClient'
 import { generateClientMsgId } from '@/utils/id'
+import { compressImageForUpload } from '@/utils/imageUpload'
 
 const props = defineProps<{ conversationId: string }>()
 const messages = useMessagesStore()
@@ -23,12 +24,18 @@ function sendTyping(): void {
 async function onSend(): Promise<void> {
   const content = text.value.trim()
   if (!content || sending.value) return
+  if (!props.conversationId) {
+    showFailToast('会话 ID 无效')
+    return
+  }
   sending.value = true
   try {
     await messages.sendText(props.conversationId, content, generateClientMsgId())
     text.value = ''
   } catch (e) {
-    showFailToast(e instanceof Error ? e.message : String(e))
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[ChatInput] send failed', props.conversationId, msg)
+    showFailToast(msg)
   } finally {
     sending.value = false
   }
@@ -45,7 +52,8 @@ async function onFileChange(ev: Event): Promise<void> {
   if (!file) return
   sending.value = true
   try {
-    const uploaded = await uploadImage(file)
+    const prepared = await compressImageForUpload(file)
+    const uploaded = await uploadImage(prepared)
     await messages.sendImage(
       props.conversationId,
       uploaded.media_url,

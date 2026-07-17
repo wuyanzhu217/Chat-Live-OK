@@ -1,3 +1,4 @@
+import { showFailToast } from 'vant'
 import { env } from '@/config/env'
 import { getAccessToken } from '@/auth/tokenStorage'
 import type { WsEnvelope, WsEventHandler } from './events'
@@ -14,6 +15,7 @@ export class RealtimeClient {
   private shouldReconnect = false
   private intentionalClose = false
   private pendingSend: Array<{ event: string; data: Record<string, unknown> }> = []
+  private lastErrorToastAt = 0
 
   on(event: string, handler: WsEventHandler): void {
     if (!this.handlers.has(event)) {
@@ -59,6 +61,7 @@ export class RealtimeClient {
 
     ws.onopen = () => {
       this.reconnectAttempt = 0
+      this.lastErrorToastAt = 0
       this.emitConnection(true)
       this.startPing()
       this.flushPendingSend()
@@ -84,6 +87,15 @@ export class RealtimeClient {
     }
 
     ws.onerror = () => {
+      const now = Date.now()
+      if (now - this.lastErrorToastAt > 8000) {
+        this.lastErrorToastAt = now
+        showFailToast({
+          message: '实时连接失败，来电/通话信令可能不可用，请检查网络或刷新页面',
+          duration: 5000,
+        })
+      }
+      console.warn('[WS] connection error', url.replace(/token=[^&]+/, 'token=***'))
       ws.close()
     }
   }
@@ -109,6 +121,8 @@ export class RealtimeClient {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       if (event.startsWith('webrtc.')) {
         this.pendingSend.push({ event, data })
+        // Queued — will flush on reconnect; not a fatal send failure.
+        return true
       }
       return false
     }
@@ -124,7 +138,7 @@ export class RealtimeClient {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
     const queued = this.pendingSend.splice(0)
     for (const item of queued) {
-      this.ws.send(JSON.stringify(item))
+      this.ws.send(JSON.stringify({ event: item.event, data: item.data }))
     }
   }
 

@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE_FILE := server/deploy/docker-compose.yml
 ENV_FILE     := server/deploy/.env
 
-.PHONY: dev-up dev-down dev-logs dev-ps srs-test init-keycloak-db chatlive-build dev-up-full smoke-p2 help
+.PHONY: dev-up dev-down dev-logs dev-ps srs-test init-keycloak-db chatlive-build dev-up-full smoke-p2 tls-cert tls-renew help
 
 help:
 	@echo "Chat-Live-OK Monorepo"
@@ -12,6 +12,9 @@ help:
 	@echo "  make dev-up-full      Build chatlive-server image and start full stack"
 	@echo "  make chatlive-build   Build chatlive-server Docker image only"
 	@echo "  make smoke-p2         Run P2 IM smoke test (needs jq, running stack)"
+	@echo "  make clear-stale-calls  End zombie ringing/connected calls (fix busy line)"
+	@echo "  make tls-cert           Obtain Let's Encrypt cert (set TLS_DOMAIN in .env)"
+	@echo "  make tls-renew          Renew Let's Encrypt cert"
 	@echo "  make dev-down         Stop dev stack"
 	@echo "  make dev-logs         Follow compose logs"
 	@echo "  make dev-ps           Show running services"
@@ -22,7 +25,10 @@ help:
 
 dev-up:
 	@test -f $(ENV_FILE) || (echo "Copy server/deploy/.env.example to server/deploy/.env first" && exit 1)
+	@bash server/deploy/nginx/gen-dev-cert.sh
+	@bash server/deploy/nginx/resolve-nginx-tls.sh
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d
+	@sleep 3 && bash server/deploy/scripts/sync-keycloak-https.sh || true
 
 chatlive-build:
 	@test -f $(ENV_FILE) || (echo "Copy server/deploy/.env.example to server/deploy/.env first" && exit 1)
@@ -30,10 +36,24 @@ chatlive-build:
 
 dev-up-full: chatlive-build
 	@test -f $(ENV_FILE) || (echo "Copy server/deploy/.env.example to server/deploy/.env first" && exit 1)
+	@bash server/deploy/nginx/gen-dev-cert.sh
+	@bash server/deploy/nginx/resolve-nginx-tls.sh
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d
+	@sleep 3 && bash server/deploy/scripts/sync-keycloak-https.sh || true
+
+tls-cert:
+	@test -f $(ENV_FILE) || (echo "Copy server/deploy/.env.example to server/deploy/.env first" && exit 1)
+	@bash server/deploy/nginx/obtain-tls-cert.sh
+	@bash server/deploy/scripts/sync-keycloak-https.sh || true
+
+tls-renew:
+	@bash server/deploy/nginx/renew-tls-cert.sh
 
 smoke-p2:
 	@bash server/scripts/smoke-p2.sh
+
+clear-stale-calls:
+	@bash server/deploy/scripts/clear-stale-calls.sh
 
 dev-down:
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) down

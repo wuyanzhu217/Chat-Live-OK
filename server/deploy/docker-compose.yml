@@ -13,7 +13,9 @@
 #   8000  SRS WebRTC UDP
 #   3478  coturn
 #   8081  Keycloak (OIDC / admin)
-#   8888  nginx gateway (API/HLS/WHIP/auth proxy for local dev)
+#   8888  nginx HTTPS gateway (API/HLS/WHIP/auth + Vite proxy) — primary entry
+#   8443  nginx HTTPS gateway (alias, same TLS backend)
+#   80    nginx HTTP → 301 to https://host:8888
 
 services:
   postgres:
@@ -135,9 +137,17 @@ services:
     container_name: chatlive-nginx
     restart: unless-stopped
     ports:
-      - "8888:80"
+      - "80:80"
+      - "8888:443"
+      - "8443:443"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/letsencrypt:/etc/letsencrypt:ro
+      - ./nginx/acme-webroot:/var/www/certbot:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - srs
       - chatlive

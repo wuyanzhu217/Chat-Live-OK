@@ -2,6 +2,9 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 
+const hmrClientPort = Number(process.env.VITE_HMR_CLIENT_PORT || 8888)
+const hmrProtocol = process.env.VITE_HMR_PROTOCOL === 'ws' ? 'ws' : 'wss'
+
 export default defineConfig({
   plugins: [vue()],
   resolve: {
@@ -13,19 +16,27 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     strictPort: true,
+    hmr: {
+      clientPort: hmrClientPort,
+      protocol: hmrProtocol,
+    },
+    allowedHosts: true,
     proxy: {
       '/auth': {
-        target: 'http://127.0.0.1:8888',
+        target: process.env.VITE_DEV_PROXY || 'https://127.0.0.1:8888',
         changeOrigin: true,
+        secure: false,
       },
       '/v1': {
-        target: 'http://127.0.0.1:8888',
+        target: process.env.VITE_DEV_PROXY || 'https://127.0.0.1:8888',
         changeOrigin: true,
+        secure: false,
         ws: true,
       },
       '/live': {
-        target: 'http://127.0.0.1:8888',
+        target: process.env.VITE_DEV_PROXY || 'https://127.0.0.1:8888',
         changeOrigin: true,
+        secure: false,
         bypass(req) {
           const path = req.url?.split('?')[0] ?? ''
           if (path.startsWith('/live/broadcast') || path.startsWith('/live/watch')) {
@@ -34,8 +45,9 @@ export default defineConfig({
         },
       },
       '/rtc': {
-        target: 'http://127.0.0.1:8888',
+        target: process.env.VITE_DEV_PROXY || 'https://127.0.0.1:8888',
         changeOrigin: true,
+        secure: false,
       },
     },
   },

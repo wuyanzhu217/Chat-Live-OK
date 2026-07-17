@@ -289,7 +289,52 @@ void CallService::initiate(const drogon::orm::DbClientPtr& db,
                 db, calleeId,
                 [db, callerId, calleeId, type, conversationId, onSuccess, onError](bool busy) {
                     if (busy) {
-                        onError("Callee busy");
+                        // 对方可能是僵尸占线（媒体失败未挂断）→ 清理超过 60s 的会话后重试一次
+                        db->execSqlAsync(
+                            "UPDATE calls c SET status = 'ended', ended_at = NOW() "
+                            "FROM call_participants cp "
+                            "WHERE cp.call_id = c.id AND cp.user_id = $1 "
+                            "AND c.status IN ('ringing', 'connected') "
+                            "AND c.created_at < NOW() - INTERVAL '60 seconds' "
+                            "RETURNING c.id",
+                            [db, callerId, calleeId, type, conversationId, onSuccess, onError](
+                                const drogon::orm::Result& r) {
+                                if (r.size() == 0) {
+                                    onError("Callee busy");
+                                    return;
+                                }
+                                isUserBusy(
+                                    db, calleeId,
+                                    [db, callerId, calleeId, type, conversationId, onSuccess, onError](bool stillBusy) {
+                                        if (stillBusy) {
+                                            onError("Callee busy");
+                                            return;
+                                        }
+                                        isUserBusy(
+                                            db, callerId,
+                                            [db, callerId, calleeId, type, conversationId, onSuccess, onError](bool callerBusy) {
+                                                auto proceed = [db, callerId, calleeId, type, conversationId, onSuccess, onError]() {
+                                                    ensureConversation(
+                                                        db, callerId, calleeId, conversationId,
+                                                        [db, callerId, calleeId, type, onSuccess, onError](const std::string& convId) {
+                                                            createCall(db, callerId, calleeId, type, convId, onSuccess, onError);
+                                                        },
+                                                        onError);
+                                                };
+                                                if (callerBusy) {
+                                                    forceEndActiveCallsForUser(db, callerId, proceed, onError);
+                                                } else {
+                                                    proceed();
+                                                }
+                                            },
+                                            onError);
+                                    },
+                                    onError);
+                            },
+                            [onError](const drogon::orm::DrogonDbException& e) {
+                                onError(std::string("DB error: ") + e.base().what());
+                            },
+                            calleeId);
                         return;
                     }
 
@@ -776,11 +821,11 @@ void CallService::expireRingingCalls(const drogon::orm::DbClientPtr& db)
             LOG_WARN << "[Call] expireRingingCalls: " << e.base().what();
         });
 
-    // connected 僵尸会话（媒体失败未挂断）超过 5 分钟自动结束
+    // connected 僵尸会话（媒体失败未挂断）超过 90 秒自动结束
     db->execSqlAsync(
         "UPDATE calls SET status = 'ended', ended_at = NOW() "
         "WHERE status = 'connected' "
-        "AND COALESCE(started_at, created_at) < NOW() - INTERVAL '5 minutes' "
+        "AND COALESCE(started_at, created_at) < NOW() - INTERVAL '90 seconds' "
         "RETURNING id",
         [db](const drogon::orm::Result& r) {
             for (const auto& row : r) {

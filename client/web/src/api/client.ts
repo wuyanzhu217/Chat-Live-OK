@@ -68,6 +68,27 @@ class ApiClient {
     return this.request<T>('PUT', path, { body })
   }
 
+  private async parseUploadResponse<T>(res: Response): Promise<T> {
+    if (res.status === 413) {
+      throw new ApiError(
+        413,
+        '图片过大（服务器限制约 1MB），已自动压缩仍失败时请换一张较小的图片',
+        res.status,
+      )
+    }
+
+    const contentType = res.headers.get('content-type') || ''
+    if (!contentType.includes('application/json')) {
+      throw new ApiError(
+        res.status,
+        res.ok ? 'Upload failed' : `上传失败 (HTTP ${res.status})`,
+        res.status,
+      )
+    }
+
+    return this.parseResponse<T>(res)
+  }
+
   async uploadForm<T>(path: string, formData: FormData): Promise<T> {
     const token = getAccessToken()
     const headers: Record<string, string> = {}
@@ -84,7 +105,7 @@ class ApiClient {
       if (refreshed) return this.uploadForm<T>(path, formData)
     }
 
-    return this.parseResponse<T>(res)
+    return this.parseUploadResponse<T>(res)
   }
 }
 

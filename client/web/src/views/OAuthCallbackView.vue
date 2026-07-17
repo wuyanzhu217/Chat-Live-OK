@@ -11,6 +11,13 @@ const auth = useAuthStore()
 const error = ref('')
 
 onMounted(async () => {
+  const stateParam = route.query.state as string | undefined
+  if (stateParam) {
+    const dedupeKey = `chatlive_oauth_done_${stateParam}`
+    if (sessionStorage.getItem(dedupeKey)) return
+    sessionStorage.setItem(dedupeKey, '1')
+  }
+
   const oauthError = route.query.error as string | undefined
   if (oauthError) {
     error.value = (route.query.error_description as string) || oauthError

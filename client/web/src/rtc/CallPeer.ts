@@ -1,4 +1,5 @@
 import type { CallType, IceServerConfig } from '@/types/call'
+import { assertMediaDevicesAvailable, formatMediaError } from '@/utils/media'
 import { realtimeClient } from '@/ws/RealtimeClient'
 
 export type CallPeerHandlers = {
@@ -137,9 +138,15 @@ export class CallPeer {
   private async acquireLocalMedia(
     type: CallType,
   ): Promise<{ stream: MediaStream; hasVideo: boolean }> {
+    assertMediaDevicesAvailable()
+
     if (type !== 'video') {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-      return { stream, hasVideo: false }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        return { stream, hasVideo: false }
+      } catch (e) {
+        throw new Error(formatMediaError(e))
+      }
     }
 
     const attempts: MediaStreamConstraints[] = [
@@ -165,10 +172,8 @@ export class CallPeer {
         '本端无摄像头，仍可听/说并观看对方画面',
       )
       return { stream, hasVideo: false }
-    } catch {
-      const msg =
-        lastError instanceof Error ? lastError.message : 'Could not start media devices'
-      throw new Error(msg)
+    } catch (e) {
+      throw new Error(formatMediaError(lastError ?? e))
     }
   }
 

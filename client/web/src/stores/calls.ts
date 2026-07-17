@@ -1,8 +1,10 @@
 import { defineStore } from 'pinia'
+import { showFailToast } from 'vant'
 import { computed, ref, shallowRef } from 'vue'
 import {
   acceptCall,
   cancelCall,
+  getCall,
   hangupCall,
   initiateCall,
   rejectCall,
@@ -14,6 +16,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useMessagesStore } from '@/stores/messages'
 import { useConversationsStore } from '@/stores/conversations'
 import type { Message } from '@/types/message'
+import { assertMediaDevicesAvailable, formatMediaError } from '@/utils/media'
+import { augmentIceServers } from '@/utils/iceServers'
 
 const TERMINAL: Set<string> = new Set([
   'ended',
@@ -36,6 +40,7 @@ export const useCallsStore = defineStore('calls', () => {
 
   let peer: CallPeer | null = null
   let mediaStarting = false
+  let outgoingPollTimer: ReturnType<typeof setInterval> | null = null
   /** Offers/answers/candidates that arrive before CallPeer is ready */
   let earlyOffer: string | null = null
   let earlyAnswer: string | null = null
@@ -56,6 +61,40 @@ export const useCallsStore = defineStore('calls', () => {
     return call.value?.participants?.find((p) => p.user_id === me)?.role ?? null
   })
 
+  function stopOutgoingPoll(): void {
+    if (outgoingPollTimer) {
+      clearInterval(outgoingPollTimer)
+      outgoingPollTimer = null
+    }
+  }
+
+  /** REST fallback when caller misses WS call.state (common on mobile WSS issues). */
+  function startOutgoingPoll(callId: string): void {
+    stopOutgoingPoll()
+    outgoingPollTimer = setInterval(() => {
+      void (async () => {
+        if (phase.value !== 'outgoing' || !call.value || call.value.id !== callId) {
+          stopOutgoingPoll()
+          return
+        }
+        try {
+          const updated = await getCall(callId)
+          if (!call.value || call.value.id !== callId) return
+          call.value = updated
+          if (updated.status === 'connected') {
+            stopOutgoingPoll()
+            await onCallState(callId, 'connected')
+          } else if (TERMINAL.has(updated.status)) {
+            stopOutgoingPoll()
+            await onCallState(callId, updated.status)
+          }
+        } catch {
+          // ignore transient network errors
+        }
+      })()
+    }, 1500)
+  }
+
   function resetMedia(): void {
     peer?.stop()
     peer = null
@@ -71,6 +110,7 @@ export const useCallsStore = defineStore('calls', () => {
   }
 
   function resetAll(): void {
+    stopOutgoingPoll()
     resetMedia()
     phase.value = 'idle'
     call.value = null
@@ -119,7 +159,9 @@ export const useCallsStore = defineStore('calls', () => {
     phase.value = 'connecting'
     error.value = null
     try {
+      assertMediaDevicesAvailable()
       const rtc = await getRtcConfig(call.value.id)
+      const iceServers = augmentIceServers(rtc.ice_servers)
       const isCaller = myRole.value === 'caller'
       const nextPeer = new CallPeer(call.value.id, peerUser.user_id, isCaller, {
         onRemoteStream: (stream) => {
@@ -134,14 +176,16 @@ export const useCallsStore = defineStore('calls', () => {
           flashError(message)
         },
         onError: (err) => {
-          flashError(err.message)
+          const msg = formatMediaError(err)
+          flashError(msg)
+          showFailToast({ message: msg, duration: 4000 })
           // Only fatal errors (ICE / send failure) end the call
           void endServerCallAndReset()
         },
       })
       // Do not publish `peer` until RTCPeerConnection exists inside start().
       // Otherwise inbound offers hit handleOffer while pc is still null.
-      await nextPeer.start(rtc.ice_servers, call.value.type)
+      await nextPeer.start(iceServers, call.value.type)
       peer = nextPeer
       localStream.value = peer.getLocalStream()
       localHasVideo.value = peer.hasLocalVideo()
@@ -163,7 +207,9 @@ export const useCallsStore = defineStore('calls', () => {
         await peer.handleCandidate(c.candidate, c.mid, c.mlineIndex)
       }
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      const msg = formatMediaError(e)
+      error.value = msg
+      showFailToast({ message: msg, duration: 5000 })
       peer?.stop()
       peer = null
       localStream.value = null
@@ -186,7 +232,10 @@ export const useCallsStore = defineStore('calls', () => {
     const status = current.status
     const role = myRole.value
     try {
-      if (status === 'ringing' || phase.value === 'outgoing' || phase.value === 'incoming') {
+      if (status === 'connected') {
+        const result = await hangupCall(id)
+        applyCallRecord(result)
+      } else if (status === 'ringing' || phase.value === 'outgoing' || phase.value === 'incoming') {
         if (role === 'caller') {
           await cancelCall(id)
         } else {
@@ -222,6 +271,7 @@ export const useCallsStore = defineStore('calls', () => {
       })
       call.value = created
       phase.value = 'outgoing'
+      startOutgoingPoll(created.id)
     } catch (e) {
       // 忙线等由 ChatView 弹 Toast；此处不写 error，避免与 Overlay 重复且清不掉
       resetAll()
@@ -328,6 +378,7 @@ export const useCallsStore = defineStore('calls', () => {
     }
 
     if (status === 'connected') {
+      stopOutgoingPoll()
       // Caller: start media when notified. Callee may already have started in accept().
       if (!peer && !mediaStarting) {
         await startMediaSession()

@@ -84,8 +84,10 @@ Json::Value TurnCredentialService::buildIceServers(const std::string& userId)
     const std::string username = generateUsername(userId);
     const std::string credential = generateCredential(username);
 
-    const std::string stunUrl = "stun:" + host_ + ":" + std::to_string(port_);
-    const std::string turnUrl = "turn:" + host_ + ":" + std::to_string(port_);
+    const std::string hostPort = host_ + ":" + std::to_string(port_);
+    const std::string stunUrl = "stun:" + hostPort;
+    const std::string turnUdp = "turn:" + hostPort + "?transport=udp";
+    const std::string turnTcp = "turn:" + hostPort + "?transport=tcp";
 
     Json::Value servers(Json::arrayValue);
 
@@ -94,7 +96,9 @@ Json::Value TurnCredentialService::buildIceServers(const std::string& userId)
     servers.append(stun);
 
     Json::Value turn;
-    turn["urls"] = turnUrl;
+    turn["urls"] = Json::Value(Json::arrayValue);
+    turn["urls"].append(turnUdp);
+    turn["urls"].append(turnTcp);
     turn["username"] = username;
     turn["credential"] = credential;
     servers.append(turn);

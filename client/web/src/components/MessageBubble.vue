@@ -3,12 +3,19 @@ import { ref } from 'vue'
 import { showImagePreview } from 'vant'
 import type { Message } from '@/types/message'
 import { useAuthStore } from '@/stores/auth'
+import { normalizeMediaUrl } from '@/utils/mediaUrl'
 
 defineProps<{ message: Message }>()
 const auth = useAuthStore()
 const imageError = ref(false)
 
-function openPreview(url: string): void {
+function imageSrc(message: Message): string {
+  return normalizeMediaUrl(message.thumbnail_url || message.media_url)
+}
+
+function openPreview(message: Message): void {
+  const url = normalizeMediaUrl(message.media_url)
+  if (!url) return
   showImagePreview({
     images: [url],
     closeable: true,
@@ -29,10 +36,10 @@ function openPreview(url: string): void {
     </template>
     <template v-else-if="message.type === 'image' && message.media_url && !imageError">
       <img
-        :src="message.thumbnail_url || message.media_url"
+        :src="imageSrc(message)"
         class="bubble__image"
         alt="图片"
-        @click="openPreview(message.media_url!)"
+        @click="openPreview(message)"
         @error="imageError = true"
       />
     </template>
