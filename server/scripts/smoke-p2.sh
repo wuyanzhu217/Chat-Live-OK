@@ -2,10 +2,11 @@
 # P2 单聊联调冒烟测试（需已运行 make dev-up 且 chatlive-server 可访问）
 set -euo pipefail
 
-API_BASE="${API_BASE:-http://localhost:8888}"
-KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8081}"
+API_BASE="${API_BASE:-https://127.0.0.1:8888}"
+KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8081/auth}"
 REALM="${KEYCLOAK_REALM:-chatlive}"
 CLIENT_ID="${KEYCLOAK_CLIENT_ID:-chatlive-desktop}"
+CURL_TLS=(-k)
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -34,12 +35,12 @@ api() {
   local method=$1 path=$2 token=$3
   local body=${4:-}
   if [[ -n "$body" ]]; then
-    curl -sf -X "$method" "${API_BASE}${path}" \
+    curl -sf "${CURL_TLS[@]}" -X "$method" "${API_BASE}${path}" \
       -H "Authorization: Bearer ${token}" \
       -H "Content-Type: application/json" \
       -d "$body"
   else
-    curl -sf -X "$method" "${API_BASE}${path}" \
+    curl -sf "${CURL_TLS[@]}" -X "$method" "${API_BASE}${path}" \
       -H "Authorization: Bearer ${token}"
   fi
 }
@@ -55,7 +56,7 @@ assert_code() {
 echo "==> P2 smoke test against ${API_BASE}"
 
 echo "==> health"
-curl -sf "${API_BASE}/health-chatlive" >/dev/null || curl -sf "http://localhost:8088/health" >/dev/null
+curl -sf "${CURL_TLS[@]}" "${API_BASE}/health-chatlive" >/dev/null || curl -sf "http://localhost:8088/health" >/dev/null
 pass "health"
 
 echo "==> Keycloak tokens (alice / bob)"

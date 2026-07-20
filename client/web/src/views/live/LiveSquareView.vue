@@ -19,10 +19,6 @@ onActivated(() => {
 function openWatch(roomId: string): void {
   void router.push(`/live/watch/${roomId}`)
 }
-
-function roomWatchId(room: { id: string; stream_key: string }): string {
-  return room.stream_key || room.id
-}
 </script>
 
 <template>
@@ -61,7 +57,7 @@ function roomWatchId(room: { id: string; stream_key: string }): string {
       v-for="room in live.rooms"
       :key="room.id"
       is-link
-      @click="openWatch(roomWatchId(room))"
+      @click="openWatch(room.id)"
     >
       <template #icon>
         <UserAvatar

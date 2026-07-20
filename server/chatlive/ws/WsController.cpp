@@ -6,6 +6,7 @@
 #include "../services/PresenceService.h"
 #include "../services/ConversationService.h"
 #include "../services/CallService.h"
+#include "../services/LiveService.h"
 #include "../utils/ApiResponse.h"
 
 #include <drogon/HttpAppFramework.h>
@@ -125,6 +126,7 @@ void WsController::handleConnectionClosed(const drogon::WebSocketConnectionPtr& 
     const std::string userId = ctx->userId;
 
     WsHub::instance().onDisconnect(userId, conn);
+    LiveService::onUserDisconnect(userId);
 
     LOG_INFO << "[WS] User disconnected user_id=" << userId;
 
@@ -160,6 +162,12 @@ void WsController::dispatchEvent(const drogon::WebSocketConnectionPtr& conn,
         case ws::EventType::WebRtcAnswer:
         case ws::EventType::WebRtcCandidate:
             handleWebRtcSignal(conn, userId, eventType, data);
+            break;
+        case ws::EventType::LiveJoin:
+            handleLiveJoin(conn, userId, data);
+            break;
+        case ws::EventType::LiveDanmaku:
+            handleLiveDanmaku(conn, userId, data);
             break;
         default:
             sendError(conn, "Unknown event");
@@ -261,6 +269,36 @@ void WsController::handleWebRtcSignal(const drogon::WebSocketConnectionPtr& conn
         },
         [conn](const std::string& err) {
             sendWsError(conn, ApiCode::NotMember, err);
+        });
+}
+
+void WsController::handleLiveJoin(const drogon::WebSocketConnectionPtr& conn,
+                                  const std::string& userId,
+                                  const Json::Value& data)
+{
+    (void)conn;
+    if (!data.isMember("room_id") || !data["room_id"].isString()) {
+        sendError(conn, "room_id required");
+        return;
+    }
+    LiveService::wsJoin(data["room_id"].asString(), userId);
+}
+
+void WsController::handleLiveDanmaku(const drogon::WebSocketConnectionPtr& conn,
+                                     const std::string& userId,
+                                     const Json::Value& data)
+{
+    if (!data.isMember("room_id") || !data["room_id"].isString() ||
+        !data.isMember("content") || !data["content"].isString()) {
+        sendError(conn, "room_id and content required");
+        return;
+    }
+    const auto db = drogon::app().getDbClient();
+    LiveService::wsDanmaku(
+        db, data["room_id"].asString(), userId, data["content"].asString(),
+        [](const Json::Value&) {},
+        [conn](const std::string& err) {
+            sendWsError(conn, ApiCode::LiveBadStatus, err);
         });
 }
 

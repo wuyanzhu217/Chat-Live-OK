@@ -120,7 +120,7 @@ services:
       - srs_data:/usr/local/srs/objs
     command: ["./objs/srs", "-c", "conf/chatlive.conf"]
     depends_on:
-      mock-auth:
+      chatlive:
         condition: service_started
 
   coturn:
@@ -172,6 +172,8 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-chatlive_dev_minio}
       MINIO_BUCKET: ${MINIO_BUCKET:-chatlive-media}
       SRS_HOOK_SECRET: dev
+      LIVE_PUBLIC_BASE: ${LIVE_PUBLIC_BASE:-https://127.0.0.1:8888}
+      LIVE_RTMP_HOST: ${LIVE_RTMP_HOST:-127.0.0.1:1935}
     ports:
       - "8088:8088"
       - "8089:8089"

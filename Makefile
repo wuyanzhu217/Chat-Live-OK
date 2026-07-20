@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE_FILE := server/deploy/docker-compose.yml
 ENV_FILE     := server/deploy/.env
 
-.PHONY: dev-up dev-down dev-logs dev-ps srs-test init-keycloak-db chatlive-build dev-up-full smoke-p2 tls-cert tls-renew help
+.PHONY: dev-up dev-down dev-logs dev-ps srs-test init-keycloak-db chatlive-build dev-up-full smoke-p2 smoke-p4 tls-cert tls-renew help
 
 help:
 	@echo "Chat-Live-OK Monorepo"
@@ -12,6 +12,7 @@ help:
 	@echo "  make dev-up-full      Build chatlive-server image and start full stack"
 	@echo "  make chatlive-build   Build chatlive-server Docker image only"
 	@echo "  make smoke-p2         Run P2 IM smoke test (needs jq, running stack)"
+	@echo "  make smoke-p4         Run P4 Live API smoke test (needs jq, running stack)"
 	@echo "  make clear-stale-calls  End zombie ringing/connected calls (fix busy line)"
 	@echo "  make tls-cert           Obtain Let's Encrypt cert (set TLS_DOMAIN in .env)"
 	@echo "  make tls-renew          Renew Let's Encrypt cert"
@@ -53,6 +54,9 @@ tls-renew:
 
 smoke-p2:
 	@bash server/scripts/smoke-p2.sh
+
+smoke-p4:
+	@bash server/scripts/smoke-p4.sh
 
 clear-stale-calls:
 	@bash server/deploy/scripts/clear-stale-calls.sh

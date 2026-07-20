@@ -53,12 +53,14 @@ add_executable(chatlive-server
     services/MinioService.cpp
     services/CallService.cpp
     services/TurnCredentialService.cpp
+    services/LiveService.cpp
     utils/ApiResponse.cpp
     controllers/FriendController.cpp
     controllers/ConversationController.cpp
     controllers/MessageController.cpp
     controllers/CallController.cpp
     controllers/UploadController.cpp
+    controllers/LiveController.cpp
 )
 
 target_link_libraries(chatlive-server

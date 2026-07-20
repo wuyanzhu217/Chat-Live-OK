@@ -17,6 +17,8 @@ enum class EventType {
     WebRtcOffer, // 发起WebRTC通话
     WebRtcAnswer, // 接听WebRTC通话
     WebRtcCandidate, // WebRTC候选者
+    LiveJoin,
+    LiveDanmaku,
     Error, // 错误
     Unknown // 未知事件
 };

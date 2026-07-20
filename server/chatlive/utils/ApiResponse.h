@@ -27,6 +27,12 @@ constexpr int MsgNotFound = 3003;
 constexpr int UnsupportedMsgType = 3004;
 constexpr int ImageTooLarge = 3005;
 constexpr int UploadFailed = 3006;
+
+constexpr int LiveRoomNotFound = 5001;
+constexpr int LiveNotAnchor = 5002;
+constexpr int LiveBadStatus = 5003;
+constexpr int LivePushAuthFail = 5004;
+constexpr int LiveAlreadyActive = 5005;
 } // namespace ApiCode
 
 class ApiResponse {

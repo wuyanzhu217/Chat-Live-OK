@@ -116,7 +116,7 @@ onUnmounted(() => {
         <router-link
           v-if="live.currentRoom"
           class="studio__watch-link"
-          :to="`/live/watch/${live.currentRoom.stream_key}`"
+          :to="`/live/watch/${live.currentRoom.id}`"
           target="_blank"
         >
           新窗口打开观看页

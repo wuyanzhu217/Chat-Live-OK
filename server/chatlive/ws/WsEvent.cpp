@@ -15,6 +15,8 @@ EventType stringToEventType(const std::string& event) {
     if (event == "webrtc.offer") return EventType::WebRtcOffer;
     if (event == "webrtc.answer") return EventType::WebRtcAnswer;
     if (event == "webrtc.candidate") return EventType::WebRtcCandidate;
+    if (event == "live.join") return EventType::LiveJoin;
+    if (event == "live.danmaku") return EventType::LiveDanmaku;
     if (event == "error") return EventType::Error;
     return EventType::Unknown;
 }
@@ -33,6 +35,8 @@ std::string eventTypeToString(EventType type) {
         case EventType::WebRtcOffer: return "webrtc.offer";
         case EventType::WebRtcAnswer: return "webrtc.answer";
         case EventType::WebRtcCandidate: return "webrtc.candidate";
+        case EventType::LiveJoin: return "live.join";
+        case EventType::LiveDanmaku: return "live.danmaku";
         case EventType::Error: return "error";
         default: return "unknown";
     }

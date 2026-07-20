@@ -50,6 +50,12 @@ private:
                             const std::string& userId,
                             ws::EventType type,
                             const Json::Value& data);
+    void handleLiveJoin(const drogon::WebSocketConnectionPtr& conn,
+                        const std::string& userId,
+                        const Json::Value& data);
+    void handleLiveDanmaku(const drogon::WebSocketConnectionPtr& conn,
+                           const std::string& userId,
+                           const Json::Value& data);
 
     void sendError(const drogon::WebSocketConnectionPtr& conn,
                    const std::string& message);

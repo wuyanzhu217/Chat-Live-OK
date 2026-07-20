@@ -84,6 +84,20 @@ export DATABASE_URL="postgres://chatlive:chatlive_dev@localhost:5432/chatlive"
 | GET | `/v1/calls/{id}` | 查询通话详情 |
 | GET | `/v1/calls/{id}/rtc-config` | WebRTC ICE/TURN 配置 |
 
+### REST 直播接口（P4）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/v1/live/rooms` | 直播列表 |
+| POST | `/v1/live/rooms` | 创建直播间 |
+| GET/PUT | `/v1/live/rooms/{id}` | 详情 / 更新 |
+| POST | `/v1/live/rooms/{id}/start` | 开播（签发 WHIP/RTMP + token） |
+| POST | `/v1/live/rooms/{id}/stop` | 结束直播 |
+| POST | `/v1/live/rooms/{id}/join` | 观众进入 |
+| GET | `/v1/live/rooms/{id}/danmaku` | 最近弹幕 |
+| POST | `/internal/srs/on_publish` | SRS 推流鉴权（内网，无 JWT） |
+| POST | `/internal/srs/on_unpublish` | SRS 断流通知 |
+
 ### WebSocket 接口（端口 8089）
 
 | 路径 | 说明 |
@@ -100,6 +114,8 @@ export DATABASE_URL="postgres://chatlive:chatlive_dev@localhost:5432/chatlive"
 - `typing.start` / `typing.stop` → 输入状态广播为 `typing`
 - `webrtc.offer` / `webrtc.answer` / `webrtc.candidate` → 校验 `call_id` 后转发信令
 - `call.incoming` / `call.state` → REST 通话状态变更时推送
+- `live.join` / `live.danmaku` → 进入直播间 / 发弹幕
+- `live.viewer_count` / `live.started` / `live.ended` → 人数与开播/结束推送
 
 ### Docker 运行
 
@@ -115,21 +131,22 @@ curl http://localhost:8888/health-chatlive
 3. 若不存在 → 自动创建记录（`username` 和 `nickname` 初始为 `keycloak_sub` 的前32位）
 4. 返回用户资料
 
-## P2 联调
+## P2 / P4 联调
 
 ```bash
 make dev-up-full          # 或 make dev-up + 本地运行 chatlive-server
 make smoke-p2             # 好友 / 会话 / 消息 / 已读 冒烟测试（需 jq）
+make smoke-p4             # 直播 REST + SRS on_publish 鉴权冒烟测试
 ```
 
 所有 REST 响应统一为 `{code, message, data, request_id}`。
 
 ## 下一步计划
 
-- P4：LiveController + SRS 推流鉴权 + 弹幕
-- MinIO 图片/头像上传
-- 统一 REST 响应格式 `{code, message, data}`
-- 多实例 WS 路由（Redis）
+- P4：✅ LiveController + SRS 推流鉴权 + 弹幕 WS（本机内存 token/观众，单实例）
+- Desktop RTMP 开播接入
+- 多实例：push token / viewer 迁 Redis
+- 统一 REST 响应格式 `{code, message, data}`（已基本完成）
 
 ## 错误处理与日志
 

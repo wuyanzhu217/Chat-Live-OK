@@ -18,6 +18,27 @@ import { assertMediaDevicesAvailable, formatMediaError } from '@/utils/media'
 
 const SRS_SESSION_RELEASE_MS = 3000
 
+/** Prefer same-origin path so :8443 / :8888 both work (avoid cross-port CORS). */
+function sameOriginUrl(url: string): string {
+  if (!url || url.startsWith('/') || url.startsWith('rtmp://')) return url
+  try {
+    const u = new URL(url, typeof window !== 'undefined' ? window.location.origin : undefined)
+    return `${u.pathname}${u.search}`
+  } catch {
+    return url
+  }
+}
+
+function normalizePlayUrls(urls: PlayUrls): PlayUrls {
+  return {
+    ...urls,
+    hls: sameOriginUrl(urls.hls),
+    whep: urls.whep ? sameOriginUrl(urls.whep) : urls.whep,
+    flv: urls.flv ? sameOriginUrl(urls.flv) : urls.flv,
+    ll_hls: urls.ll_hls ? sameOriginUrl(urls.ll_hls) : urls.ll_hls,
+  }
+}
+
 export const useLiveStore = defineStore('live', () => {
   const phase = ref<LivePhase>('idle')
   const rooms = ref<LiveRoom[]>([])
@@ -153,9 +174,26 @@ export const useLiveStore = defineStore('live', () => {
       const result = await startLiveRoom(room.id)
       currentRoom.value = result.room
       myRoom.value = result.room
-      pushUrls.value = result.push_urls
-      playUrls.value = result.play_urls
-      await publisher.start(result.push_urls.whip, stream)
+      pushUrls.value = {
+        ...result.push_urls,
+        whip: sameOriginUrl(result.push_urls.whip),
+      }
+      playUrls.value = normalizePlayUrls(result.play_urls)
+      try {
+        await publisher.start(pushUrls.value.whip, stream)
+      } catch (whipErr) {
+        // start API already marked room live — roll back so square does not stay "live"
+        try {
+          await stopLiveRoom(room.id)
+        } catch {
+          /* ignore */
+        }
+        currentRoom.value = null
+        myRoom.value = null
+        pushUrls.value = null
+        playUrls.value = null
+        throw whipErr
+      }
       phase.value = 'live'
       broadcasting.value = true
     } catch (e) {
@@ -195,16 +233,20 @@ export const useLiveStore = defineStore('live', () => {
         try {
           const updated = await stopLiveRoom(room.id)
           currentRoom.value = updated
-          myRoom.value = updated
+          myRoom.value = null
         } catch (e) {
           showFailToast(e instanceof Error ? e.message : String(e))
+          myRoom.value = null
         }
       } else if (room && devMode.value) {
         currentRoom.value = { ...room, status: 'ended' }
         myRoom.value = null
+      } else {
+        myRoom.value = null
       }
 
       pushUrls.value = null
+      playUrls.value = null
       phase.value = 'idle'
       broadcasting.value = false
       devMode.value = false
@@ -222,7 +264,7 @@ export const useLiveStore = defineStore('live', () => {
     try {
       const result = await joinLiveRoom(roomId)
       currentRoom.value = result.room
-      playUrls.value = result.play_urls
+      playUrls.value = normalizePlayUrls(result.play_urls)
       danmaku.value = result.recent_danmaku ?? []
       viewerCount.value = result.room.viewer_count
       watching.value = true

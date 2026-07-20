@@ -11,6 +11,7 @@
 #include "services/TurnCredentialService.h"
 #include "services/CallService.h"
 #include "services/MinioService.h"
+#include "services/LiveService.h"
 #include "utils/ApiResponse.h"
 
 using namespace drogon;
@@ -67,6 +68,7 @@ int main()
 
     chatlive::TurnCredentialService::loadFromEnv();
     chatlive::MinioService::loadFromEnv();
+    chatlive::LiveService::loadFromEnv();
 
     // ==================== 数据库配置 ====================
     orm::PostgresConfig pgConfig;
