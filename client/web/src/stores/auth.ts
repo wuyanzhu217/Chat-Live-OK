@@ -21,6 +21,7 @@ import {
 import type { User } from '@/types/user'
 import { realtimeClient } from '@/ws/RealtimeClient'
 import { bindRealtimeStores } from '@/ws/bindStores'
+import { useCallsStore } from '@/stores/calls'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
@@ -72,6 +73,7 @@ export const useAuthStore = defineStore('auth', () => {
     await fetchMe()
     bindRealtimeStores()
     realtimeClient.connect()
+    void useCallsStore().reconcileOnLogin()
   }
 
   async function fetchMe(): Promise<void> {
@@ -92,6 +94,7 @@ export const useAuthStore = defineStore('auth', () => {
     await fetchMe()
     bindRealtimeStores()
     realtimeClient.connect()
+    void useCallsStore().reconcileOnLogin()
   }
 
   async function logout(): Promise<void> {

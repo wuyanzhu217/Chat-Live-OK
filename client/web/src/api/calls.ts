@@ -32,3 +32,8 @@ export function getCall(callId: string) {
 export function getRtcConfig(callId: string) {
   return apiClient.get<RtcConfig>(`/calls/${callId}/rtc-config`)
 }
+
+/** 回收本端僵尸 ringing/connected 占线（页面 idle 时调用） */
+export function cleanupStaleCalls() {
+  return apiClient.post<{ cleared: number }>('/calls/cleanup-stale')
+}

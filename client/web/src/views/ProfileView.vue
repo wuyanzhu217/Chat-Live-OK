@@ -34,8 +34,8 @@ async function onLogout(): Promise<void> {
       </div>
     </header>
     <CellGroup inset>
-      <Cell title="直播开播" is-link to="/live/broadcast/livestream" />
-      <Cell title="直播观看" is-link to="/live/watch/livestream" />
+      <Cell title="我的直播" is-link to="/live?tab=studio" />
+      <Cell title="直播广场" is-link to="/live" />
     </CellGroup>
     <div class="page__actions">
       <Button block round @click="onLogout">退出登录</Button>

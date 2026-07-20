@@ -9,8 +9,8 @@ import { CellGroup, Cell } from 'vant'
       <p>Vue Web 脚手架 — P1 起实现登录与聊天</p>
     </header>
     <CellGroup inset title="开发入口">
-      <Cell title="直播开播 (占位)" is-link to="/live/broadcast" />
-      <Cell title="直播观看 (占位)" is-link to="/live/watch/demo" />
+      <Cell title="直播广场" is-link to="/live" />
+      <Cell title="直播开播" is-link to="/live?tab=studio" />
     </CellGroup>
     <p class="home__hint">
       先运行 <code>make dev-up</code> 启动 SRS 等后端服务。

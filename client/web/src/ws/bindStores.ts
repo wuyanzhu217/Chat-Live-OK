@@ -5,6 +5,7 @@ import { useFriendsStore } from '@/stores/friends'
 import { useAuthStore } from '@/stores/auth'
 import { useRealtimeStore } from '@/stores/realtime'
 import { useCallsStore } from '@/stores/calls'
+import { useLiveStore } from '@/stores/live'
 import type { Message } from '@/types/message'
 import type { Presence } from '@/types/friend'
 import type { Call } from '@/types/call'
@@ -22,6 +23,7 @@ export function bindRealtimeStores(): void {
   const friends = useFriendsStore()
   const auth = useAuthStore()
   const calls = useCallsStore()
+  const live = useLiveStore()
 
   realtimeClient.on('message.new', (data) => {
     const msg = data as unknown as Message
@@ -91,5 +93,21 @@ export function bindRealtimeStores(): void {
 
   realtimeClient.on('webrtc.candidate', (data) => {
     void calls.onWebRtcCandidate(data)
+  })
+
+  realtimeClient.on('live.danmaku', (data) => {
+    live.onDanmaku(data)
+  })
+
+  realtimeClient.on('live.viewer_count', (data) => {
+    live.onViewerCount(data)
+  })
+
+  realtimeClient.on('live.started', (data) => {
+    live.onRoomStarted(data)
+  })
+
+  realtimeClient.on('live.ended', (data) => {
+    live.onRoomEnded(data)
   })
 }

@@ -18,7 +18,24 @@ class ApiClient {
   }
 
   private async parseResponse<T>(res: Response): Promise<T> {
-    const json = (await res.json()) as ApiResponse<T>
+    const contentType = res.headers.get('content-type') || ''
+    const text = await res.text()
+
+    if (!contentType.includes('application/json')) {
+      throw new ApiError(
+        res.status,
+        res.ok ? '服务返回非 JSON 响应' : `请求失败 (HTTP ${res.status})`,
+        res.status,
+      )
+    }
+
+    let json: ApiResponse<T>
+    try {
+      json = JSON.parse(text) as ApiResponse<T>
+    } catch {
+      throw new ApiError(res.status, `服务返回无效 JSON (HTTP ${res.status})`, res.status)
+    }
+
     if (json.code !== 0) {
       throw new ApiError(json.code, json.message || 'Request failed', res.status, json.request_id)
     }

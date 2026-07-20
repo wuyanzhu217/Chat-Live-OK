@@ -9,14 +9,17 @@ import {
   initiateCall,
   rejectCall,
   getRtcConfig,
+  cleanupStaleCalls,
 } from '@/api/calls'
 import type { Call, CallPhase, CallType } from '@/types/call'
+import { ApiError } from '@/types/api'
 import { CallPeer } from '@/rtc/CallPeer'
 import { useAuthStore } from '@/stores/auth'
 import { useMessagesStore } from '@/stores/messages'
 import { useConversationsStore } from '@/stores/conversations'
 import type { Message } from '@/types/message'
 import { assertMediaDevicesAvailable, formatMediaError } from '@/utils/media'
+import { bindCallVideoElement } from '@/utils/callVideo'
 import { augmentIceServers } from '@/utils/iceServers'
 
 const TERMINAL: Set<string> = new Set([
@@ -118,6 +121,39 @@ export const useCallsStore = defineStore('calls', () => {
     busy.value = false
   }
 
+  /** 登录/刷新后对齐服务端占线状态，避免 UI 与 DB 不一致 */
+  async function reconcileOnLogin(): Promise<void> {
+    if (phase.value !== 'idle' && call.value?.id) {
+      try {
+        const updated = await getCall(call.value.id)
+        if (TERMINAL.has(updated.status)) {
+          resetAll()
+        }
+      } catch {
+        resetAll()
+      }
+      return
+    }
+    if (phase.value !== 'idle') {
+      resetAll()
+      return
+    }
+    try {
+      await cleanupStaleCalls()
+    } catch {
+      // ignore — 不影响登录
+    }
+  }
+
+  async function cleanupStaleIfIdle(): Promise<void> {
+    if (phase.value !== 'idle') return
+    try {
+      await cleanupStaleCalls()
+    } catch {
+      // ignore
+    }
+  }
+
   function clearError(): void {
     error.value = null
   }
@@ -166,6 +202,8 @@ export const useCallsStore = defineStore('calls', () => {
       const nextPeer = new CallPeer(call.value.id, peerUser.user_id, isCaller, {
         onRemoteStream: (stream) => {
           remoteStream.value = stream
+          const el = document.getElementById('call-remote-video') as HTMLVideoElement | null
+          void bindCallVideoElement(el, stream, false)
         },
         onConnectionState: (state) => {
           if (state === 'connected') {
@@ -273,6 +311,9 @@ export const useCallsStore = defineStore('calls', () => {
       phase.value = 'outgoing'
       startOutgoingPoll(created.id)
     } catch (e) {
+      if (e instanceof ApiError && e.code === 4002 && /caller busy/i.test(e.message)) {
+        await cleanupStaleIfIdle()
+      }
       // 忙线等由 ChatView 弹 Toast；此处不写 error，避免与 Overlay 重复且清不掉
       resetAll()
       throw e
@@ -476,5 +517,7 @@ export const useCallsStore = defineStore('calls', () => {
     toggleCamera,
     resetAll,
     clearError,
+    reconcileOnLogin,
+    cleanupStaleIfIdle,
   }
 })

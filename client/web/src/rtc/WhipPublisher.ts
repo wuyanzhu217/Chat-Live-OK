@@ -32,7 +32,12 @@ export class WhipPublisher {
 
     if (!response.ok) {
       const text = await response.text()
-      throw new Error(`WHIP 失败: HTTP ${response.status} ${text || response.statusText}`)
+      if (response.status === 502 || /5020|stream.*busy|already exists/i.test(text)) {
+        throw new Error(
+          '推流通道已被占用（可能正在连接或上一路流未释放）。请先结束直播，等待 3 秒后再试。',
+        )
+      }
+      throw new Error(`WHIP 信令失败 (HTTP ${response.status})：${text || response.statusText}`)
     }
 
     const answerSdp = await response.text()
@@ -44,7 +49,7 @@ export class WhipPublisher {
     } catch {
       this.stop()
       throw new Error(
-        '推流信令成功，但媒体未到达 SRS（UDP :8000）。请确认 SRS_CANDIDATE 为可从本机访问的 VM 局域网 IP，且防火墙放行 UDP 8000。',
+        '推流信令成功，但媒体未到达 SRS（UDP :8000）。请确认云安全组已放行 UDP 8000，且 SRS_CANDIDATE 为浏览器可访问的公网 IP。',
       )
     }
   }

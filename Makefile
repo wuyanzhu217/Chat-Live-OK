@@ -27,6 +27,7 @@ dev-up:
 	@test -f $(ENV_FILE) || (echo "Copy server/deploy/.env.example to server/deploy/.env first" && exit 1)
 	@bash server/deploy/nginx/gen-dev-cert.sh
 	@bash server/deploy/nginx/resolve-nginx-tls.sh
+	@bash server/deploy/coturn/resolve-turn-conf.sh
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d
 	@sleep 3 && bash server/deploy/scripts/sync-keycloak-https.sh || true
 
@@ -38,6 +39,7 @@ dev-up-full: chatlive-build
 	@test -f $(ENV_FILE) || (echo "Copy server/deploy/.env.example to server/deploy/.env first" && exit 1)
 	@bash server/deploy/nginx/gen-dev-cert.sh
 	@bash server/deploy/nginx/resolve-nginx-tls.sh
+	@bash server/deploy/coturn/resolve-turn-conf.sh
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d
 	@sleep 3 && bash server/deploy/scripts/sync-keycloak-https.sh || true
 

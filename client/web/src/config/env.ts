@@ -29,4 +29,6 @@ export const env = {
   appOrigin: browserOrigin() || import.meta.env.VITE_APP_ORIGIN || 'http://127.0.0.1:5173',
   liveRtcBase: import.meta.env.VITE_LIVE_RTC_BASE || '/rtc',
   liveHlsBase: import.meta.env.VITE_LIVE_HLS_BASE || '/live',
+  /** When Live REST API is unavailable, fall back to direct SRS dev URLs. */
+  liveDevFallback: import.meta.env.VITE_LIVE_DEV_FALLBACK !== 'false',
 }

@@ -2,15 +2,15 @@
 # Host network mode in docker-compose; ICE from GET /v1/calls/{id}/rtc-config
 
 listening-port=3478
-listening-ip=172.22.162.225
-relay-ip=172.22.162.225
-external-ip=8.154.31.5/172.22.162.225
+listening-ip=@TURN_INTERNAL_IP@
+relay-ip=@TURN_INTERNAL_IP@
+external-ip=@TURN_HOST@/@TURN_INTERNAL_IP@
 
 fingerprint
 lt-cred-mech
 use-auth-secret
-static-auth-secret=chatlive_turn_dev_secret
-realm=chatlive.local
+static-auth-secret=@TURN_SECRET@
+realm=@TURN_REALM@
 total-quota=100
 stale-nonce=600
 no-multicast-peers

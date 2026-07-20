@@ -289,38 +289,33 @@ void CallService::initiate(const drogon::orm::DbClientPtr& db,
                 db, calleeId,
                 [db, callerId, calleeId, type, conversationId, onSuccess, onError](bool busy) {
                     if (busy) {
-                        // 对方可能是僵尸占线（媒体失败未挂断）→ 清理超过 60s 的会话后重试一次
-                        db->execSqlAsync(
-                            "UPDATE calls c SET status = 'ended', ended_at = NOW() "
-                            "FROM call_participants cp "
-                            "WHERE cp.call_id = c.id AND cp.user_id = $1 "
-                            "AND c.status IN ('ringing', 'connected') "
-                            "AND c.created_at < NOW() - INTERVAL '60 seconds' "
-                            "RETURNING c.id",
-                            [db, callerId, calleeId, type, conversationId, onSuccess, onError](
-                                const drogon::orm::Result& r) {
-                                if (r.size() == 0) {
-                                    onError("Callee busy");
-                                    return;
-                                }
+                        // 对方可能是僵尸占线（媒体失败/断线未挂断）→ 清理后重试一次
+                        const auto retryAfterCalleeClear =
+                            [db, callerId, calleeId, type, conversationId, onSuccess, onError]() {
                                 isUserBusy(
                                     db, calleeId,
-                                    [db, callerId, calleeId, type, conversationId, onSuccess, onError](bool stillBusy) {
+                                    [db, callerId, calleeId, type, conversationId, onSuccess, onError](
+                                        bool stillBusy) {
                                         if (stillBusy) {
                                             onError("Callee busy");
                                             return;
                                         }
                                         isUserBusy(
                                             db, callerId,
-                                            [db, callerId, calleeId, type, conversationId, onSuccess, onError](bool callerBusy) {
-                                                auto proceed = [db, callerId, calleeId, type, conversationId, onSuccess, onError]() {
-                                                    ensureConversation(
-                                                        db, callerId, calleeId, conversationId,
-                                                        [db, callerId, calleeId, type, onSuccess, onError](const std::string& convId) {
-                                                            createCall(db, callerId, calleeId, type, convId, onSuccess, onError);
-                                                        },
-                                                        onError);
-                                                };
+                                            [db, callerId, calleeId, type, conversationId, onSuccess, onError](
+                                                bool callerBusy) {
+                                                auto proceed =
+                                                    [db, callerId, calleeId, type, conversationId, onSuccess,
+                                                     onError]() {
+                                                        ensureConversation(
+                                                            db, callerId, calleeId, conversationId,
+                                                            [db, callerId, calleeId, type, onSuccess, onError](
+                                                                const std::string& convId) {
+                                                                createCall(db, callerId, calleeId, type, convId,
+                                                                           onSuccess, onError);
+                                                            },
+                                                            onError);
+                                                    };
                                                 if (callerBusy) {
                                                     forceEndActiveCallsForUser(db, callerId, proceed, onError);
                                                 } else {
@@ -330,6 +325,31 @@ void CallService::initiate(const drogon::orm::DbClientPtr& db,
                                             onError);
                                     },
                                     onError);
+                            };
+
+                        // 被叫离线时，活跃通话必为僵尸，直接全部结束
+                        if (!WsHub::instance().isOnline(calleeId)) {
+                            LOG_WARN << "[Call] callee offline with active calls, clearing stale "
+                                     << calleeId;
+                            forceEndActiveCallsForUser(db, calleeId, retryAfterCalleeClear, onError);
+                            return;
+                        }
+
+                        db->execSqlAsync(
+                            "UPDATE calls c SET status = 'ended', ended_at = NOW() "
+                            "FROM call_participants cp "
+                            "WHERE cp.call_id = c.id AND cp.user_id = $1 "
+                            "AND c.status IN ('ringing', 'connected') "
+                            "AND c.created_at < NOW() - INTERVAL '30 seconds' "
+                            "RETURNING c.id",
+                            [db, calleeId, retryAfterCalleeClear, onError](const drogon::orm::Result& r) {
+                                if (r.size() == 0) {
+                                    onError("Callee busy");
+                                    return;
+                                }
+                                LOG_WARN << "[Call] cleared " << r.size()
+                                         << " stale call(s) for busy callee " << calleeId;
+                                retryAfterCalleeClear();
                             },
                             [onError](const drogon::orm::DrogonDbException& e) {
                                 onError(std::string("DB error: ") + e.base().what());
@@ -821,11 +841,11 @@ void CallService::expireRingingCalls(const drogon::orm::DbClientPtr& db)
             LOG_WARN << "[Call] expireRingingCalls: " << e.base().what();
         });
 
-    // connected 僵尸会话（媒体失败未挂断）超过 90 秒自动结束
+    // connected 僵尸会话（媒体失败未挂断）超过 45 秒自动结束
     db->execSqlAsync(
         "UPDATE calls SET status = 'ended', ended_at = NOW() "
         "WHERE status = 'connected' "
-        "AND COALESCE(started_at, created_at) < NOW() - INTERVAL '90 seconds' "
+        "AND COALESCE(started_at, created_at) < NOW() - INTERVAL '45 seconds' "
         "RETURNING id",
         [db](const drogon::orm::Result& r) {
             for (const auto& row : r) {
@@ -855,6 +875,32 @@ void CallService::expireRingingCalls(const drogon::orm::DbClientPtr& db)
         [](const drogon::orm::DrogonDbException& e) {
             LOG_WARN << "[Call] expireConnected: " << e.base().what();
         });
+}
+
+void CallService::cleanupStaleForUser(const drogon::orm::DbClientPtr& db,
+                                      const std::string& userId,
+                                      std::function<void(int cleared)> onSuccess,
+                                      ErrorCallback onError)
+{
+    db->execSqlAsync(
+        "SELECT COUNT(DISTINCT c.id)::int AS n FROM calls c "
+        "JOIN call_participants cp ON cp.call_id = c.id "
+        "WHERE cp.user_id = $1 AND c.status IN ('ringing', 'connected')",
+        [db, userId, onSuccess, onError](const drogon::orm::Result& r) {
+            const int pending = (r.size() > 0) ? r[0]["n"].as<int>() : 0;
+            if (pending == 0) {
+                onSuccess(0);
+                return;
+            }
+            forceEndActiveCallsForUser(
+                db, userId,
+                [onSuccess, pending]() { onSuccess(pending); },
+                onError);
+        },
+        [onError](const drogon::orm::DrogonDbException& e) {
+            onError(std::string("DB error: ") + e.base().what());
+        },
+        userId);
 }
 
 } // namespace chatlive

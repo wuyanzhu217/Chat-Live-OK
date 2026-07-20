@@ -91,6 +91,12 @@ public:
                                           VoidCallback onDone,
                                           ErrorCallback onError);
 
+    /** 客户端 idle 时主动回收本端占线；返回结束的通话数 */
+    static void cleanupStaleForUser(const drogon::orm::DbClientPtr& db,
+                                    const std::string& userId,
+                                    std::function<void(int cleared)> onSuccess,
+                                    ErrorCallback onError);
+
 private:
     static void loadParticipants(const drogon::orm::DbClientPtr& db,
                                    const std::string& callId,

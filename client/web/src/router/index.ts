@@ -32,6 +32,11 @@ const router = createRouter({
           component: () => import('@/views/FriendsView.vue'),
         },
         {
+          path: 'live',
+          name: 'live',
+          component: () => import('@/views/live/LiveView.vue'),
+        },
+        {
           path: 'me',
           name: 'me',
           component: () => import('@/views/ProfileView.vue'),
@@ -44,16 +49,13 @@ const router = createRouter({
       component: () => import('@/views/ChatView.vue'),
     },
     {
-      path: '/live/broadcast/:roomId?',
-      name: 'live-broadcast',
-      component: () => import('@/views/live/LiveBroadcast.vue'),
-      meta: { public: true },
-    },
-    {
       path: '/live/watch/:roomId',
       name: 'live-watch',
-      component: () => import('@/views/live/LiveWatch.vue'),
-      meta: { public: true },
+      component: () => import('@/views/live/LiveWatchView.vue'),
+    },
+    {
+      path: '/live/broadcast/:roomId?',
+      redirect: { path: '/live', query: { tab: 'studio' } },
     },
   ],
 })

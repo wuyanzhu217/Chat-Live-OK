@@ -219,4 +219,29 @@ void CallController::getRtcConfig(const drogon::HttpRequestPtr& req,
         });
 }
 
+void CallController::cleanupStale(const drogon::HttpRequestPtr& req,
+                                  std::function<void(const drogon::HttpResponsePtr&)>&& callback)
+{
+    const auto sub = req->attributes()->get<std::string>("user_sub");
+    const auto db = drogon::app().getDbClient();
+
+    UserService::getUserIdBySub(
+        db, sub,
+        [callback, db](const std::string& userId) {
+            CallService::cleanupStaleForUser(
+                db, userId,
+                [callback](int cleared) {
+                    Json::Value data;
+                    data["cleared"] = cleared;
+                    callback(ApiResponse::ok(data));
+                },
+                [callback](const std::string& err) {
+                    callback(mapCallError(err));
+                });
+        },
+        [callback](const std::string& err) {
+            callback(ApiResponse::err(ApiCode::UserNotFound, err, drogon::k404NotFound));
+        });
+}
+
 } // namespace chatlive
