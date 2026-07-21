@@ -1,6 +1,14 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
+function safeRedirect(path: unknown): string {
+  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//')) {
+    return '/conversations'
+  }
+  if (path.startsWith('/login')) return '/conversations'
+  return path
+}
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -62,15 +70,15 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
-  if (!auth.initialized) {
-    await auth.bootstrap()
-  }
+  await auth.bootstrap()
+
   if (to.meta.public) {
     if (to.name === 'login' && auth.isAuthenticated) {
-      return '/conversations'
+      return safeRedirect(to.query.redirect)
     }
     return true
   }
+
   if (!auth.isAuthenticated) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }

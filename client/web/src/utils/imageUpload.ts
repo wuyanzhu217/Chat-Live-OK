@@ -43,8 +43,8 @@ export async function compressImageForUpload(
   }
 
   const source = await loadImageSource(file)
-  const srcWidth = 'width' in source ? source.width : source.naturalWidth
-  const srcHeight = 'height' in source ? source.height : source.naturalHeight
+  const srcWidth = 'naturalWidth' in source ? source.naturalWidth : source.width
+  const srcHeight = 'naturalHeight' in source ? source.naturalHeight : source.height
 
   let width = srcWidth
   let height = srcHeight

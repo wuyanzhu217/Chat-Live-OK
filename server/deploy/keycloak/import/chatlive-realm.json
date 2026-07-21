@@ -93,7 +93,8 @@
         "https://192.168.32.128:8888"
       ],
       "attributes": {
-        "pkce.code.challenge.method": "S256"
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
       },
       "protocol": "openid-connect"
     },

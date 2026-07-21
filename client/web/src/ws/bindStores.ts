@@ -60,6 +60,11 @@ export function bindRealtimeStores(): void {
 
   realtimeClient.on('friend.accepted', () => {
     void friends.fetchFriends()
+    void friends.fetchRequests()
+  })
+
+  realtimeClient.on('friend.request', () => {
+    void friends.fetchRequests()
   })
 
   realtimeClient.on('typing', (data) => {

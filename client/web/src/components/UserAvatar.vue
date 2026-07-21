@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { normalizeMediaUrl } from '@/utils/mediaUrl'
 
 const props = withDefaults(
   defineProps<{
@@ -16,6 +17,8 @@ const initials = computed(() => {
   return n.slice(0, 1).toUpperCase()
 })
 
+const resolvedAvatarUrl = computed(() => normalizeMediaUrl(props.avatarUrl))
+
 const style = computed(() => ({
   width: `${props.size}px`,
   height: `${props.size}px`,
@@ -25,7 +28,7 @@ const style = computed(() => ({
 
 <template>
   <div class="avatar" :style="style">
-    <img v-if="avatarUrl" :src="avatarUrl" :alt="name" class="avatar__img" />
+    <img v-if="resolvedAvatarUrl" :src="resolvedAvatarUrl" :alt="name" class="avatar__img" />
     <span v-else class="avatar__text">{{ initials }}</span>
   </div>
 </template>

@@ -1,0 +1,12 @@
+build/
+cmake-build-*/
+.idea/
+.vscode/
+*.user
+*.autosave
+config/app.json
+# Keep third_party/libdatachannel source; ignore its local builds if any
+third_party/libdatachannel/build/
+
+# Vendored via scripts/fetch-deps.sh (too large for monorepo)
+third_party/libdatachannel/

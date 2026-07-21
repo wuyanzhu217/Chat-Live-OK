@@ -1,0 +1,22 @@
+{
+  "gateway": "https://127.0.0.1:8888",
+  "api_base": "https://127.0.0.1:8888/v1",
+  "ws_url": "wss://127.0.0.1:8888/v1/ws",
+  "keycloak": {
+    "issuer": "https://127.0.0.1:8888/auth/realms/chatlive",
+    "client_id": "chatlive-desktop",
+    "redirect_uri": "http://127.0.0.1:8765/callback",
+    "scopes": "openid profile offline_access"
+  },
+  "live": {
+    "hls_base": "/live",
+    "rtc_base": "/rtc",
+    "srs_http_base": "http://127.0.0.1:8080",
+    "ffmpeg_path": "ffmpeg",
+    "comment": "srs_http_base: optional plain-HTTP HLS via SRS :8080 (avoids self-signed TLS in QMediaPlayer). Leave empty to use gateway HTTPS."
+  },
+  "dev": {
+    "allow_insecure_ssl": true,
+    "comment": "Dev only: accept self-signed nginx certs. Set false in production."
+  }
+}

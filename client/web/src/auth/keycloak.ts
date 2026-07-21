@@ -6,7 +6,9 @@ import {
   generateVerifier,
   savePkceSession,
 } from './pkce'
-import { clearTokens, setTokens, type TokenPair } from './tokenStorage'
+import { clearTokens, getIdToken, setTokens, type TokenPair } from './tokenStorage'
+
+export type AuthPrompt = 'login' | 'select_account' | 'none'
 
 function tokenEndpoint(): string {
   return `${env.keycloakIssuer}/protocol/openid-connect/token`
@@ -16,11 +18,19 @@ function authEndpoint(): string {
   return `${env.keycloakIssuer}/protocol/openid-connect/auth`
 }
 
+function logoutEndpoint(): string {
+  return `${env.keycloakIssuer}/protocol/openid-connect/logout`
+}
+
 export function redirectUri(): string {
   return `${env.appOrigin}/login/callback`
 }
 
-export async function buildAuthUrl(): Promise<string> {
+export function postLogoutRedirectUri(): string {
+  return `${env.appOrigin}/login`
+}
+
+export async function buildAuthUrl(options?: { prompt?: AuthPrompt }): Promise<string> {
   const verifier = generateVerifier()
   const challenge = await generateChallenge(verifier)
   const state = generateState()
@@ -35,7 +45,23 @@ export async function buildAuthUrl(): Promise<string> {
     code_challenge: challenge,
     code_challenge_method: 'S256',
   })
+  if (options?.prompt) {
+    params.set('prompt', options.prompt)
+  }
   return `${authEndpoint()}?${params.toString()}`
+}
+
+/** End Keycloak SSO session, then land on /login. */
+export function buildLogoutUrl(): string {
+  const params = new URLSearchParams({
+    client_id: env.keycloakClientId,
+    post_logout_redirect_uri: postLogoutRedirectUri(),
+  })
+  const idToken = getIdToken()
+  if (idToken) {
+    params.set('id_token_hint', idToken)
+  }
+  return `${logoutEndpoint()}?${params.toString()}`
 }
 
 async function postToken(body: URLSearchParams): Promise<TokenPair> {
@@ -52,6 +78,7 @@ async function postToken(body: URLSearchParams): Promise<TokenPair> {
   return {
     access_token: json.access_token,
     refresh_token: json.refresh_token,
+    id_token: json.id_token,
     expires_in: json.expires_in ?? 7200,
   }
 }
@@ -77,7 +104,13 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenPai
     refresh_token: refreshToken,
   })
   const tokens = await postToken(body)
-  setTokens(tokens)
+  // Keycloak may omit refresh_token / id_token on refresh — keep previous values.
+  setTokens({
+    access_token: tokens.access_token,
+    refresh_token: tokens.refresh_token || refreshToken,
+    id_token: tokens.id_token || getIdToken() || undefined,
+    expires_in: tokens.expires_in ?? 7200,
+  })
   return tokens
 }
 

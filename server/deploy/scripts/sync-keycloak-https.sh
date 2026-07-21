@@ -57,6 +57,7 @@ with open("/tmp/kc-client-in.json", encoding="utf-8") as f:
 
 redirect = data.setdefault("redirectUris", [])
 origins = data.setdefault("webOrigins", [])
+attrs = data.setdefault("attributes", {})
 for u in redirect_add:
     if u not in redirect:
         redirect.append(u)
@@ -64,6 +65,8 @@ if origin_add not in origins:
     origins.append(origin_add)
 if "+" not in origins:
     origins.append("+")
+# Allow post-logout redirect back to app /login (and any Valid Redirect URI when "+").
+attrs["post.logout.redirect.uris"] = "+"
 
 with open("/tmp/kc-client-out.json", "w", encoding="utf-8") as f:
     json.dump(data, f)

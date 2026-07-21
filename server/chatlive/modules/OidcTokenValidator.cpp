@@ -12,8 +12,10 @@ namespace chatlive {
 
 namespace {
 
+//功能：将响应内容写入到userp中
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp)
 {
+    //将响应内容写入到userp中
     static_cast<std::string*>(userp)->append(static_cast<char*>(contents), size * nmemb);
     return size * nmemb;
 }
@@ -94,8 +96,10 @@ OidcTokenValidator::OidcTokenValidator(const std::string& jwksUri,
 {
 }
 
+//功能：从jwksUri_中获取jwks，并将其存储到body中
 bool OidcTokenValidator::fetchJwks(const std::string& uri, std::string& body) const
 {
+    //初始化curl，设置url，写入回调函数，设置超时时间
     CURL* curl = curl_easy_init();
     if (!curl) return false;
 
@@ -105,9 +109,11 @@ bool OidcTokenValidator::fetchJwks(const std::string& uri, std::string& body) co
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
 
     const CURLcode res = curl_easy_perform(curl);
+    //获取响应码
     long http_code = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
     curl_easy_cleanup(curl);
+    //释放curl
 
     return (res == CURLE_OK && http_code == 200);
 }
@@ -142,9 +148,11 @@ std::optional<std::string> OidcTokenValidator::validate(const std::string& token
     }
 
     try {
+        //解码token，token格式为：header.payload.signature，decode函数将token分割为header, payload, signature,返回一个jwt::jwt_object对象
         const auto decoded = jwt::decode(token);
 
         std::string kid;
+        //获取kid，从header.payload.signature的kid字段中获取
         try {
             kid = decoded.get_key_id();
         } catch (...) {
@@ -152,6 +160,7 @@ std::optional<std::string> OidcTokenValidator::validate(const std::string& token
         }
 
         std::string pem;
+        //从keyCache_中获取pem
         {
             std::lock_guard<std::mutex> lock(mutex_);
             auto it = keyCache_.find(kid);
@@ -160,21 +169,24 @@ std::optional<std::string> OidcTokenValidator::validate(const std::string& token
             }
         }
         if (pem.empty()) {
+            //如果pem为空，则从jwksUri_中获取jwks，并将其存储到keyCache_中
             refreshJwks();
             std::lock_guard<std::mutex> lock(mutex_);
             auto it = keyCache_.find(kid);
+            //如果pem为空，则从jwksUri_中获取jwks，并将其存储到keyCache_中
             if (it == keyCache_.end()) {
                 return std::nullopt;
             }
             pem = it->second;
         }
 
-        auto verifier = jwt::verify().allow_algorithm(jwt::algorithm::rs256(pem));
-        if (!expectedAudience_.empty()) {
+        //验证token
+        auto verifier = jwt::verify().allow_algorithm(jwt::algorithm::rs256(pem));//使用pem验证token
+        if (!expectedAudience_.empty()) {//如果expectedAudience_不为空，则验证audience
             verifier.with_audience(expectedAudience_);
         }
 
-        verifier.verify(decoded);
+        verifier.verify(decoded);//验证token
 
         // Dev: accept any host as long as realm path matches (SSH tunnel / NAT IP).
         if (!expectedIssuer_.empty()) {

@@ -1,6 +1,7 @@
 #include "ConversationController.h"
 #include "../services/UserService.h"
 #include "../services/ConversationService.h"
+#include "../services/FriendshipService.h"
 #include "../utils/ApiResponse.h"
 
 #include <drogon/HttpAppFramework.h>
@@ -16,7 +17,7 @@ static drogon::HttpResponsePtr convErr(drogon::HttpStatusCode http, const std::s
     if (http == drogon::k400BadRequest) {
         code = ApiCode::InvalidParam;
     } else if (http == drogon::k403Forbidden) {
-        code = ApiCode::NotMember;
+        code = (msg == "Not friends") ? ApiCode::NotFriends : ApiCode::NotMember;
     } else if (http == drogon::k404NotFound) {
         code = ApiCode::ConvNotFound;
     }
@@ -183,37 +184,49 @@ void ConversationController::createConversation(const drogon::HttpRequestPtr& re
                 return;
             }
 
-            ConversationService::findDirectConversation(
+            FriendshipService::areFriends(
                 dbClient, creatorId, peerUserId,
-                [cb, dbClient](const std::string& existingId) {
-                    dbClient->execSqlAsync(
-                        "SELECT id, type, name, avatar_url, created_at, updated_at FROM conversations WHERE id = $1",
-                        [cb](const drogon::orm::Result& r) {
-                            if (r.size() == 0) {
-                                (*cb)(convErr(drogon::k404NotFound, "Conversation not found"));
-                                return;
-                            }
-                            const auto& row = r[0];
-                            Json::Value resp;
-                            resp["id"] = row["id"].as<std::string>();
-                            resp["type"] = row["type"].as<std::string>();
-                            resp["name"] = row["name"].isNull() ? Json::Value::null : row["name"].as<std::string>();
-                            resp["avatar_url"] = row["avatar_url"].isNull()
-                                ? Json::Value::null
-                                : row["avatar_url"].as<std::string>();
-                            resp["created_at"] = row["created_at"].as<std::string>();
-                            resp["updated_at"] = row["updated_at"].as<std::string>();
-                            (*cb)(ApiResponse::ok(resp));
+                [cb, dbClient, creatorId, peerUserId](bool friends) {
+                    if (!friends) {
+                        (*cb)(convErr(drogon::k403Forbidden, "Not friends"));
+                        return;
+                    }
+
+                    ConversationService::findDirectConversation(
+                        dbClient, creatorId, peerUserId,
+                        [cb, dbClient](const std::string& existingId) {
+                            dbClient->execSqlAsync(
+                                "SELECT id, type, name, avatar_url, created_at, updated_at FROM conversations WHERE id = $1",
+                                [cb](const drogon::orm::Result& r) {
+                                    if (r.size() == 0) {
+                                        (*cb)(convErr(drogon::k404NotFound, "Conversation not found"));
+                                        return;
+                                    }
+                                    const auto& row = r[0];
+                                    Json::Value resp;
+                                    resp["id"] = row["id"].as<std::string>();
+                                    resp["type"] = row["type"].as<std::string>();
+                                    resp["name"] = row["name"].isNull() ? Json::Value::null : row["name"].as<std::string>();
+                                    resp["avatar_url"] = row["avatar_url"].isNull()
+                                        ? Json::Value::null
+                                        : row["avatar_url"].as<std::string>();
+                                    resp["created_at"] = row["created_at"].as<std::string>();
+                                    resp["updated_at"] = row["updated_at"].as<std::string>();
+                                    (*cb)(ApiResponse::ok(resp));
+                                },
+                                [cb](const drogon::orm::DrogonDbException& e) {
+                                    (*cb)(convErr(drogon::k500InternalServerError,
+                                                    std::string("DB error: ") + e.base().what()));
+                                },
+                                existingId);
                         },
-                        [cb](const drogon::orm::DrogonDbException& e) {
-                            (*cb)(convErr(drogon::k500InternalServerError,
-                                            std::string("DB error: ") + e.base().what()));
+                        [cb, dbClient, creatorId, peerUserId]() {
+                            insertDirectConversation(dbClient, creatorId, peerUserId,
+                                [cb](const drogon::HttpResponsePtr& resp) { (*cb)(resp); });
                         },
-                        existingId);
-                },
-                [cb, dbClient, creatorId, peerUserId]() {
-                    insertDirectConversation(dbClient, creatorId, peerUserId,
-                        [cb](const drogon::HttpResponsePtr& resp) { (*cb)(resp); });
+                        [cb](const std::string& err) {
+                            (*cb)(convErr(drogon::k500InternalServerError, err));
+                        });
                 },
                 [cb](const std::string& err) {
                     (*cb)(convErr(drogon::k500InternalServerError, err));

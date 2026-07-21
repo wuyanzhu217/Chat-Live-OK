@@ -1,11 +1,49 @@
 #include "FriendController.h"
 #include "../services/UserService.h"
+#include "../services/FriendshipService.h"
 #include "../utils/ApiResponse.h"
 #include "../ws/WsHub.h"
 
 #include <drogon/drogon.h>
 
 namespace chatlive {
+
+namespace {
+
+void pushFriendRequestCreated(const drogon::orm::DbClientPtr& db,
+                              const std::string& requestId,
+                              const std::string& fromUserId,
+                              const std::string& toUserId,
+                              const std::string& message,
+                              const std::string& status,
+                              const std::string& createdAt,
+                              const std::function<void(const drogon::HttpResponsePtr&)>& callback)
+{
+    Json::Value data;
+    data["id"] = requestId;
+    data["status"] = status;
+    data["created_at"] = createdAt;
+    callback(ApiResponse::ok(data, drogon::k201Created));
+
+    UserService::getUserProfile(
+        db, fromUserId,
+        [toUserId, message, requestId](const Json::Value& fromUser) {
+            Json::Value pushData;
+            pushData["request_id"] = requestId;
+            pushData["from_user"] = fromUser;
+            pushData["message"] = message.empty() ? Json::Value::null : Json::Value(message);
+            WsHub::instance().pushToUser(toUserId, "friend.request", pushData);
+        },
+        [toUserId, message, requestId](const std::string& err) {
+            LOG_WARN << "[Friend] push friend.request profile load failed: " << err;
+            Json::Value pushData;
+            pushData["request_id"] = requestId;
+            pushData["message"] = message.empty() ? Json::Value::null : Json::Value(message);
+            WsHub::instance().pushToUser(toUserId, "friend.request", pushData);
+        });
+}
+
+} // namespace
 
 void FriendController::getFriends(const drogon::HttpRequestPtr& req,
                                   std::function<void(const drogon::HttpResponsePtr&)>&& callback)
@@ -76,62 +114,106 @@ void FriendController::sendFriendRequest(const drogon::HttpRequestPtr& req,
                 return;
             }
 
-            dbClient->execSqlAsync(
-                "INSERT INTO friend_requests (from_user_id, to_user_id, message) "
-                "VALUES ($1, $2, $3) "
-                "RETURNING id, status, created_at",
-                [callback, dbClient, fromUserId, toUserId, message](const drogon::orm::Result& r2) {
-                    if (r2.size() == 0) {
-                        callback(ApiResponse::err(ApiCode::Internal, "Failed to create friend request",
-                                                drogon::k500InternalServerError));
+            FriendshipService::areFriends(
+                dbClient, fromUserId, toUserId,
+                [callback, dbClient, fromUserId, toUserId, message, sub](bool friends) {
+                    if (friends) {
+                        callback(ApiResponse::err(ApiCode::AlreadyFriend,
+                                                "Already friends",
+                                                drogon::k409Conflict));
                         return;
                     }
 
-                    const auto row = r2[0];
-                    const std::string requestId = row["id"].as<std::string>();
-
-                    auto respond = [callback, row, requestId](const Json::Value& fromUser,
-                                                              const std::string& toUserId,
-                                                              const std::string& message) {
-                        Json::Value data;
-                        data["id"] = requestId;
-                        data["status"] = row["status"].as<std::string>();
-                        data["created_at"] = row["created_at"].as<std::string>();
-                        callback(ApiResponse::ok(data, drogon::k201Created));
-
-                        if (!fromUser.isNull()) {
-                            Json::Value pushData;
-                            pushData["request_id"] = requestId;
-                            pushData["from_user"] = fromUser;
-                            pushData["message"] = message.empty() ? Json::Value::null : Json::Value(message);
-                            WsHub::instance().pushToUser(toUserId, "friend.request", pushData);
+                    auto onCreated = [callback, dbClient, fromUserId, toUserId, message](
+                                         const drogon::orm::Result& r2) {
+                        if (r2.size() == 0) {
+                            callback(ApiResponse::err(ApiCode::Internal, "Failed to create friend request",
+                                                    drogon::k500InternalServerError));
+                            return;
                         }
+                        const auto row = r2[0];
+                        pushFriendRequestCreated(
+                            dbClient,
+                            row["id"].as<std::string>(),
+                            fromUserId,
+                            toUserId,
+                            message,
+                            row["status"].as<std::string>(),
+                            row["created_at"].as<std::string>(),
+                            callback);
                     };
 
-                    UserService::getUserProfile(
-                        dbClient, fromUserId,
-                        [respond, toUserId, message](const Json::Value& fromUser) {
-                            respond(fromUser, toUserId, message);
-                        },
-                        [respond, toUserId, message](const std::string& err) {
-                            LOG_WARN << "[Friend] push friend.request profile load failed: " << err;
-                            respond(Json::Value::null, toUserId, message);
-                        });
-                },
-                [callback, sub](const drogon::orm::DrogonDbException& e) {
-                    const std::string what = e.base().what();
-                    LOG_ERROR << "[Friend] sendFriendRequest DB error user_sub=" << sub << " err=" << what;
-                    if (what.find("23505") != std::string::npos ||
-                        what.find("unique constraint") != std::string::npos) {
-                        callback(ApiResponse::err(ApiCode::FriendRequestExists,
-                                                "Friend request already exists",
-                                                drogon::k409Conflict));
-                    } else {
-                        callback(ApiResponse::err(ApiCode::Internal, "DB error",
+                    dbClient->execSqlAsync(
+                        "INSERT INTO friend_requests (from_user_id, to_user_id, message) "
+                        "VALUES ($1, $2, $3) "
+                        "RETURNING id, status, created_at",
+                        onCreated,
+                        [callback, dbClient, fromUserId, toUserId, message, sub, onCreated](
+                            const drogon::orm::DrogonDbException& e) {
+                            const std::string what = e.base().what();
+                            if (what.find("23505") == std::string::npos &&
+                                what.find("unique constraint") == std::string::npos) {
+                                LOG_ERROR << "[Friend] sendFriendRequest DB error user_sub=" << sub
+                                          << " err=" << what;
+                                callback(ApiResponse::err(ApiCode::Internal, "DB error",
+                                                        drogon::k500InternalServerError));
+                                return;
+                            }
+
+                            // Unique hit: pending → conflict; rejected → reopen; accepted → already friends.
+                            dbClient->execSqlAsync(
+                                "SELECT id, status FROM friend_requests "
+                                "WHERE from_user_id = $1 AND to_user_id = $2",
+                                [callback, dbClient, fromUserId, toUserId, message, onCreated](
+                                    const drogon::orm::Result& existing) {
+                                    if (existing.size() == 0) {
+                                        callback(ApiResponse::err(ApiCode::Internal,
+                                                                "Friend request conflict",
+                                                                drogon::k500InternalServerError));
+                                        return;
+                                    }
+                                    const std::string status = existing[0]["status"].as<std::string>();
+                                    const std::string requestId = existing[0]["id"].as<std::string>();
+                                    if (status == "pending") {
+                                        callback(ApiResponse::err(ApiCode::FriendRequestExists,
+                                                                "Friend request already exists",
+                                                                drogon::k409Conflict));
+                                        return;
+                                    }
+                                    if (status == "accepted") {
+                                        callback(ApiResponse::err(ApiCode::AlreadyFriend,
+                                                                "Already friends",
+                                                                drogon::k409Conflict));
+                                        return;
+                                    }
+                                    // rejected → allow re-request
+                                    dbClient->execSqlAsync(
+                                        "UPDATE friend_requests "
+                                        "SET status = 'pending', message = $1, created_at = NOW() "
+                                        "WHERE id = $2 "
+                                        "RETURNING id, status, created_at",
+                                        onCreated,
+                                        [callback](const drogon::orm::DrogonDbException& e2) {
+                                            callback(ApiResponse::err(
+                                                ApiCode::Internal,
+                                                std::string("DB error: ") + e2.base().what(),
                                                 drogon::k500InternalServerError));
-                    }
+                                        },
+                                        message, requestId);
+                                },
+                                [callback](const drogon::orm::DrogonDbException& e2) {
+                                    callback(ApiResponse::err(
+                                        ApiCode::Internal,
+                                        std::string("DB error: ") + e2.base().what(),
+                                        drogon::k500InternalServerError));
+                                },
+                                fromUserId, toUserId);
+                        },
+                        fromUserId, toUserId, message);
                 },
-                fromUserId, toUserId, message);
+                [callback](const std::string& err) {
+                    callback(ApiResponse::err(ApiCode::Internal, err, drogon::k500InternalServerError));
+                });
         },
         [callback, sub](const std::string& err) {
             LOG_ERROR << "[Friend] sendFriendRequest lookup failed user_sub=" << sub << " err=" << err;

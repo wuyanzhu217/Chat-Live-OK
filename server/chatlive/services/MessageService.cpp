@@ -1,5 +1,6 @@
 #include "MessageService.h"
 #include "ConversationService.h"
+#include "FriendshipService.h"
 #include "../ws/WsHub.h"
 
 #include <drogon/drogon.h>
@@ -115,44 +116,49 @@ void MessageService::sendAndPush(const drogon::orm::DbClientPtr& db,
     ConversationService::isMember(
         db, convId, senderId,
         [db, convId, senderId, clientMsgId, doInsert, onSuccess, onError]() {
-            if (clientMsgId.empty()) {
-                doInsert();
-                return;
-            }
-
-            db->execSqlAsync(
-                "SELECT m.id, m.conversation_id, m.sender_id, m.type, m.content, "
-                "       m.media_url, m.thumbnail_url, m.status, m.client_msg_id, m.created_at "
-                "FROM messages m "
-                "WHERE m.conversation_id = $1 AND m.sender_id = $2 AND m.client_msg_id = $3 "
-                "LIMIT 1",
-                [db, senderId, onSuccess, onError, doInsert](const drogon::orm::Result& r) {
-                    if (r.size() == 0) {
+            FriendshipService::requireDirectFriends(
+                db, convId, senderId,
+                [db, convId, senderId, clientMsgId, doInsert, onSuccess, onError]() {
+                    if (clientMsgId.empty()) {
                         doInsert();
                         return;
                     }
+
                     db->execSqlAsync(
-                        "SELECT username, nickname, avatar_url FROM users WHERE id = $1",
-                        [senderId, row = r[0], onSuccess, onError](const drogon::orm::Result& userR) {
-                            Json::Value sender;
-                            if (userR.size() > 0) {
-                                sender["username"] = userR[0]["username"].as<std::string>();
-                                sender["nickname"] = userR[0]["nickname"].as<std::string>();
-                                sender["avatar_url"] = userR[0]["avatar_url"].isNull()
-                                    ? Json::Value::null
-                                    : userR[0]["avatar_url"].as<std::string>();
+                        "SELECT m.id, m.conversation_id, m.sender_id, m.type, m.content, "
+                        "       m.media_url, m.thumbnail_url, m.status, m.client_msg_id, m.created_at "
+                        "FROM messages m "
+                        "WHERE m.conversation_id = $1 AND m.sender_id = $2 AND m.client_msg_id = $3 "
+                        "LIMIT 1",
+                        [db, senderId, onSuccess, onError, doInsert](const drogon::orm::Result& r) {
+                            if (r.size() == 0) {
+                                doInsert();
+                                return;
                             }
-                            onSuccess(rowToMessage(row, sender));
+                            db->execSqlAsync(
+                                "SELECT username, nickname, avatar_url FROM users WHERE id = $1",
+                                [senderId, row = r[0], onSuccess, onError](const drogon::orm::Result& userR) {
+                                    Json::Value sender;
+                                    if (userR.size() > 0) {
+                                        sender["username"] = userR[0]["username"].as<std::string>();
+                                        sender["nickname"] = userR[0]["nickname"].as<std::string>();
+                                        sender["avatar_url"] = userR[0]["avatar_url"].isNull()
+                                            ? Json::Value::null
+                                            : userR[0]["avatar_url"].as<std::string>();
+                                    }
+                                    onSuccess(rowToMessage(row, sender));
+                                },
+                                [onError](const drogon::orm::DrogonDbException& e) {
+                                    onError(std::string("DB error: ") + e.base().what());
+                                },
+                                senderId);
                         },
                         [onError](const drogon::orm::DrogonDbException& e) {
                             onError(std::string("DB error: ") + e.base().what());
                         },
-                        senderId);
+                        convId, senderId, clientMsgId);
                 },
-                [onError, doInsert](const drogon::orm::DrogonDbException& e) {
-                    onError(std::string("DB error: ") + e.base().what());
-                },
-                convId, senderId, clientMsgId);
+                onError);
         },
         onError);
 }

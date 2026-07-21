@@ -1,14 +1,6 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
 import { RouterView } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
 import CallOverlay from '@/components/CallOverlay.vue'
-
-const auth = useAuthStore()
-
-onMounted(() => {
-  void auth.bootstrap()
-})
 </script>
 
 <template>

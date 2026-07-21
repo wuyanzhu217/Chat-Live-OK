@@ -20,6 +20,7 @@ constexpr int AlreadyFriend = 2101;
 constexpr int FriendRequestExists = 2102;
 constexpr int CannotFriendSelf = 2103;
 constexpr int FriendRequestNotFound = 2104;
+constexpr int NotFriends = 2105;
 
 constexpr int ConvNotFound = 3001;
 constexpr int NotMember = 3002;

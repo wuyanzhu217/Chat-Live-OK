@@ -130,6 +130,8 @@ void MessageController::sendMessage(const drogon::HttpRequestPtr& req,
                     LOG_ERROR << "[Msg] sendMessage failed user_sub=" << sub << " err=" << err;
                     if (err == "Access denied") {
                         callback(ApiResponse::err(ApiCode::NotMember, err, drogon::k403Forbidden));
+                    } else if (err == "Not friends") {
+                        callback(ApiResponse::err(ApiCode::NotFriends, err, drogon::k403Forbidden));
                     } else if (err == "Unsupported message type" || err.find("required") != std::string::npos) {
                         callback(ApiResponse::err(ApiCode::UnsupportedMsgType, err, drogon::k400BadRequest));
                     } else {

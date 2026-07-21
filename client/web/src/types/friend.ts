@@ -16,10 +16,16 @@ export interface FriendRequest {
   message: string
   status: string
   from_user?: {
-    user_id: string
+    user_id?: string
     username: string
     nickname: string
-    avatar_url: string | null
+    avatar_url?: string | null
+  }
+  to_user?: {
+    user_id?: string
+    username: string
+    nickname: string
+    avatar_url?: string | null
   }
   created_at?: string
 }

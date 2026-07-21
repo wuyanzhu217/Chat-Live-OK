@@ -1,6 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { getFriends, getFriendRequests, sendFriendRequest, acceptFriendRequest } from '@/api/friends'
+import {
+  getFriends,
+  getFriendRequests,
+  sendFriendRequest,
+  acceptFriendRequest,
+  rejectFriendRequest,
+} from '@/api/friends'
 import type { Friend, FriendRequest, Presence } from '@/types/friend'
 
 export const useFriendsStore = defineStore('friends', () => {
@@ -25,11 +31,17 @@ export const useFriendsStore = defineStore('friends', () => {
 
   async function requestFriend(toUserId: string, message = ''): Promise<void> {
     await sendFriendRequest(toUserId, message)
+    await fetchRequests()
   }
 
   async function acceptRequest(requestId: string): Promise<void> {
     await acceptFriendRequest(requestId)
     await Promise.all([fetchFriends(), fetchRequests()])
+  }
+
+  async function rejectRequest(requestId: string): Promise<void> {
+    await rejectFriendRequest(requestId)
+    await fetchRequests()
   }
 
   function setPresence(userId: string, presence: Presence): void {
@@ -45,6 +57,7 @@ export const useFriendsStore = defineStore('friends', () => {
     fetchRequests,
     requestFriend,
     acceptRequest,
+    rejectRequest,
     setPresence,
   }
 })

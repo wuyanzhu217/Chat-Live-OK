@@ -16,6 +16,8 @@ export class RealtimeClient {
   private intentionalClose = false
   private pendingSend: Array<{ event: string; data: Record<string, unknown> }> = []
   private lastErrorToastAt = 0
+  /** Bumped on every socket replace so stale handlers become no-ops. */
+  private generation = 0
 
   on(event: string, handler: WsEventHandler): void {
     if (!this.handlers.has(event)) {
@@ -47,19 +49,31 @@ export class RealtimeClient {
     }
   }
 
+  /** Connect if idle; no-op while already open or connecting (avoids login double-connect). */
+  ensureConnected(): void {
+    const state = this.ws?.readyState
+    if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) return
+    this.connect()
+  }
+
   connect(): void {
     const token = getAccessToken()
     if (!token) return
 
-    this.disconnect(false)
     this.shouldReconnect = true
     this.intentionalClose = false
+    this.clearReconnectTimer()
+    this.detachAndCloseCurrent()
 
+    const gen = ++this.generation
     const url = `${env.wsUrl}?token=${encodeURIComponent(token)}`
     const ws = new WebSocket(url)
     this.ws = ws
+    let opened = false
 
     ws.onopen = () => {
+      if (gen !== this.generation || this.ws !== ws) return
+      opened = true
       this.reconnectAttempt = 0
       this.lastErrorToastAt = 0
       this.emitConnection(true)
@@ -68,6 +82,7 @@ export class RealtimeClient {
     }
 
     ws.onmessage = (ev) => {
+      if (gen !== this.generation || this.ws !== ws) return
       try {
         const envelope = JSON.parse(ev.data as string) as WsEnvelope
         if (envelope.event === 'pong') return
@@ -77,26 +92,26 @@ export class RealtimeClient {
       }
     }
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
+      if (gen !== this.generation || this.ws !== ws) return
       this.stopPing()
-      this.emitConnection(false)
       this.ws = null
-      if (this.shouldReconnect && !this.intentionalClose) {
+      this.emitConnection(false)
+
+      const expectRetry = this.shouldReconnect && !this.intentionalClose
+      if (expectRetry) {
+        // First failure: silent retry. Repeat failures: surface a toast.
+        if (!opened && !ev.wasClean && this.reconnectAttempt >= 1) {
+          this.maybeShowErrorToast()
+        }
         this.scheduleReconnect()
       }
     }
 
     ws.onerror = () => {
-      const now = Date.now()
-      if (now - this.lastErrorToastAt > 8000) {
-        this.lastErrorToastAt = now
-        showFailToast({
-          message: '实时连接失败，来电/通话信令可能不可用，请检查网络或刷新页面',
-          duration: 5000,
-        })
-      }
+      if (gen !== this.generation || this.ws !== ws) return
       console.warn('[WS] connection error', url.replace(/token=[^&]+/, 'token=***'))
-      ws.close()
+      // Let onclose drive reconnect / toast — do not close() here (avoids abort races).
     }
   }
 
@@ -105,15 +120,9 @@ export class RealtimeClient {
       this.shouldReconnect = false
       this.intentionalClose = true
     }
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
+    this.clearReconnectTimer()
     this.stopPing()
-    if (this.ws) {
-      this.ws.close()
-      this.ws = null
-    }
+    this.detachAndCloseCurrent()
     this.emitConnection(false)
   }
 
@@ -132,6 +141,34 @@ export class RealtimeClient {
 
   get connected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
+  }
+
+  private detachAndCloseCurrent(): void {
+    const prev = this.ws
+    this.ws = null
+    if (!prev) return
+    // Drop handlers before close so aborting a CONNECTING socket cannot toast / reconnect.
+    prev.onopen = null
+    prev.onmessage = null
+    prev.onerror = null
+    prev.onclose = null
+    if (prev.readyState === WebSocket.CONNECTING || prev.readyState === WebSocket.OPEN) {
+      try {
+        prev.close()
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  private maybeShowErrorToast(): void {
+    const now = Date.now()
+    if (now - this.lastErrorToastAt <= 8000) return
+    this.lastErrorToastAt = now
+    showFailToast({
+      message: '实时连接失败，来电/通话信令可能不可用，请检查网络或刷新页面',
+      duration: 5000,
+    })
   }
 
   private flushPendingSend(): void {
@@ -153,6 +190,13 @@ export class RealtimeClient {
     if (this.pingTimer) {
       clearInterval(this.pingTimer)
       this.pingTimer = null
+    }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
     }
   }
 

@@ -48,6 +48,7 @@ add_executable(chatlive-server
     ws/WsHub.cpp
     services/UserService.cpp
     services/PresenceService.cpp
+    services/FriendshipService.cpp
     services/ConversationService.cpp
     services/MessageService.cpp
     services/MinioService.cpp
