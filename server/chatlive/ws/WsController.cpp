@@ -130,6 +130,14 @@ void WsController::handleConnectionClosed(const drogon::WebSocketConnectionPtr& 
 
     LOG_INFO << "[WS] User disconnected user_id=" << userId;
 
+    // Reconnect race: a newer socket may already be registered. Only broadcast
+    // offline when this user has no remaining live connection.
+    if (WsHub::instance().isOnline(userId)) {
+        LOG_INFO << "[WS] Skip offline broadcast; newer connection still active user_id="
+                 << userId;
+        return;
+    }
+
     const auto db = drogon::app().getDbClient();
     PresenceService::broadcastOffline(db, userId);
 }

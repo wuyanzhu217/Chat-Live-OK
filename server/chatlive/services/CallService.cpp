@@ -841,40 +841,8 @@ void CallService::expireRingingCalls(const drogon::orm::DbClientPtr& db)
             LOG_WARN << "[Call] expireRingingCalls: " << e.base().what();
         });
 
-    // connected 僵尸会话（媒体失败未挂断）超过 45 秒自动结束
-    db->execSqlAsync(
-        "UPDATE calls SET status = 'ended', ended_at = NOW() "
-        "WHERE status = 'connected' "
-        "AND COALESCE(started_at, created_at) < NOW() - INTERVAL '45 seconds' "
-        "RETURNING id",
-        [db](const drogon::orm::Result& r) {
-            for (const auto& row : r) {
-                const std::string callId = row["id"].as<std::string>();
-                loadCall(
-                    db, callId,
-                    [db, callId](const Json::Value& call) {
-                        std::vector<std::string> userIds;
-                        std::string actorId;
-                        for (const auto& p : call["participants"]) {
-                            userIds.push_back(p["user_id"].asString());
-                            if (actorId.empty()) {
-                                actorId = p["user_id"].asString();
-                            }
-                        }
-                        pushCallState(callId, "ended", userIds, "stale_connected");
-                        if (!actorId.empty()) {
-                            emitCallRecord(db, callId, actorId, "ended",
-                                           [](const Json::Value&) {});
-                        }
-                    },
-                    [](const std::string& err) {
-                        LOG_WARN << "[Call] expireConnected load failed: " << err;
-                    });
-            }
-        },
-        [](const drogon::orm::DrogonDbException& e) {
-            LOG_WARN << "[Call] expireConnected: " << e.base().what();
-        });
+    // Do NOT auto-end connected calls by age — started_at marks connect time, not a
+    // zombie signal. Use POST hangup, cleanupStaleForUser, or make clear-stale-calls.
 }
 
 void CallService::cleanupStaleForUser(const drogon::orm::DbClientPtr& db,

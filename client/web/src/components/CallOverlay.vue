@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { Icon, showToast, closeToast } from 'vant'
 import { useCallsStore } from '@/stores/calls'
 import { bindCallVideoElement, primeCallVideoPlayback } from '@/utils/callVideo'
@@ -19,6 +19,31 @@ const showLocalPane = computed(
     !!calls.localStream &&
     !calls.cameraOff,
 )
+
+/** Mobile PiP swap: true = local is main (fullscreen), remote is small. */
+const selfIsMain = ref(false)
+
+function toggleVideoFocus(): void {
+  if (!showLocalPane.value) return
+  if (typeof window !== 'undefined' && window.matchMedia('(min-width: 720px)').matches) return
+  selfIsMain.value = !selfIsMain.value
+}
+
+function onRemotePaneClick(): void {
+  if (selfIsMain.value && showLocalPane.value) toggleVideoFocus()
+}
+
+function onLocalPaneClick(): void {
+  if (!selfIsMain.value && showLocalPane.value) toggleVideoFocus()
+}
+
+watch(visible, (on) => {
+  if (!on) selfIsMain.value = false
+})
+
+watch(showLocalPane, (on) => {
+  if (!on) selfIsMain.value = false
+})
 
 const title = computed(() => {
   const name = calls.peerParticipant?.nickname || '对方'
@@ -116,6 +141,7 @@ async function onHangup(): Promise<void> {
       :class="{
         'call-overlay--video': isVideoCall,
         'call-overlay--dual': showLocalPane,
+        'call-overlay--self-main': selfIsMain && showLocalPane,
       }"
     >
       <header class="call-overlay__header">
@@ -125,7 +151,11 @@ async function onHangup(): Promise<void> {
 
       <div class="call-overlay__deck">
         <!-- Remote -->
-        <section class="call-pane call-pane--remote">
+        <section
+          class="call-pane call-pane--remote"
+          :class="{ 'call-pane--pip-hit': selfIsMain && showLocalPane }"
+          @click.stop="onRemotePaneClick"
+        >
           <div class="call-pane__chrome">
             <span class="call-pane__label">对方</span>
             <span v-if="hasRemoteVideo" class="call-pane__badge">实时</span>
@@ -167,7 +197,11 @@ async function onHangup(): Promise<void> {
         <section
           v-show="isVideoCall && calls.localHasVideo"
           class="call-pane call-pane--local"
-          :class="{ 'call-pane--local-off': !showLocalPane }"
+          :class="{
+            'call-pane--local-off': !showLocalPane,
+            'call-pane--pip-hit': !selfIsMain && showLocalPane,
+          }"
+          @click.stop="onLocalPaneClick"
         >
           <div class="call-pane__chrome">
             <span class="call-pane__label">我</span>
@@ -271,6 +305,42 @@ async function onHangup(): Promise<void> {
     #14171c;
   color: #f2f4f7;
 }
+
+/* Video call: full-bleed stage; chrome floats over the picture. */
+.call-overlay--video {
+  padding: 0;
+  background: #0b0d10;
+}
+.call-overlay--video .call-overlay__header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px 12px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), transparent);
+  pointer-events: none;
+}
+.call-overlay--video .call-overlay__actions {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  padding: 16px 8px calc(env(safe-area-inset-bottom, 0px) + 28px);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent);
+}
+.call-overlay--video .call-overlay__deck {
+  position: absolute;
+  inset: 0;
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  gap: 0;
+}
+
 .call-overlay__header {
   flex-shrink: 0;
   text-align: center;
@@ -303,18 +373,122 @@ async function onHangup(): Promise<void> {
   padding: 4px 0 8px;
 }
 
+/* Mobile / default video: remote fills screen, local is PiP. */
+.call-overlay--video .call-pane--remote {
+  position: absolute;
+  inset: 0;
+  flex: none;
+  z-index: 0;
+}
+.call-overlay--video .call-pane--local {
+  position: absolute;
+  right: 12px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 108px);
+  z-index: 1;
+  flex: none;
+  width: min(32vw, 128px);
+  height: min(42vw, 172px);
+  max-height: none;
+}
+.call-overlay--video .call-pane__chrome {
+  display: none;
+}
+.call-overlay--video .call-pane__frame {
+  min-height: 0;
+  height: 100%;
+  border-radius: 0;
+  border: none;
+}
+.call-overlay--video .call-pane--local .call-pane__frame {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+/* Mobile only: tap PiP to swap local/remote roles. */
+@media (max-width: 719px) {
+  .call-overlay--video .call-pane--pip-hit {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .call-overlay--video.call-overlay--self-main .call-pane--local {
+    inset: 0;
+    right: auto;
+    bottom: auto;
+    width: auto;
+    height: auto;
+    z-index: 0;
+  }
+  .call-overlay--video.call-overlay--self-main .call-pane--local .call-pane__frame {
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+  .call-overlay--video.call-overlay--self-main .call-pane--remote {
+    inset: auto;
+    right: 12px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 108px);
+    width: min(32vw, 128px);
+    height: min(42vw, 172px);
+    z-index: 1;
+  }
+  .call-overlay--video.call-overlay--self-main .call-pane--remote .call-pane__frame {
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+  }
+}
+
 @media (min-width: 720px) {
-  .call-overlay--dual .call-overlay__deck {
+  .call-overlay--video:not(.call-overlay--dual) .call-overlay__deck,
+  .call-overlay--video.call-overlay--dual .call-overlay__deck {
+    position: relative;
+    inset: auto;
+    flex: 1;
+    display: flex;
     flex-direction: row;
     align-items: stretch;
     gap: 16px;
+    max-width: 1100px;
+    width: 100%;
+    margin: 0 auto;
+    padding: calc(env(safe-area-inset-top, 0px) + 72px) 24px
+      calc(env(safe-area-inset-bottom, 0px) + 120px);
+    box-sizing: border-box;
   }
-  .call-overlay--dual .call-pane--remote {
+  .call-overlay--video .call-pane--remote,
+  .call-overlay--video .call-pane--local {
+    position: relative;
+    inset: auto;
+    right: auto;
+    bottom: auto;
+    width: auto;
+    height: auto;
+  }
+  .call-overlay--video .call-pane--remote {
     flex: 1.35;
+    min-height: 0;
   }
-  .call-overlay--dual .call-pane--local {
+  .call-overlay--video .call-pane--local {
     flex: 1;
     max-width: 360px;
+    min-height: 0;
+  }
+  .call-overlay--video .call-pane__chrome {
+    display: flex;
+  }
+  .call-overlay--video .call-pane__frame {
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .call-overlay--video .call-pane--local .call-pane__frame {
+    box-shadow: none;
+  }
+  .call-overlay--video .call-overlay__header,
+  .call-overlay--video .call-overlay__actions {
+    position: absolute;
   }
 }
 
@@ -382,11 +556,10 @@ async function onHangup(): Promise<void> {
 }
 
 .call-pane__media {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 /* 本地预览水平镜像（仅本端所见，不影响发给对端的真实画面） */
 .call-pane__media--mirror {
@@ -404,7 +577,8 @@ async function onHangup(): Promise<void> {
 .call-pane__video {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: center;
   background: #0b0d10;
   display: block;
 }
@@ -417,6 +591,8 @@ async function onHangup(): Promise<void> {
 }
 
 .call-pane__placeholder {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;

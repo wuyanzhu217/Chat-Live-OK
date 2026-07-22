@@ -13,12 +13,21 @@ export const useFriendsStore = defineStore('friends', () => {
   const friends = ref<Friend[]>([])
   const requests = ref<FriendRequest[]>([])
   const loading = ref(false)
+  /** presence.update may arrive before friends list is loaded */
+  const pendingPresence = new Map<string, Presence>()
 
   async function fetchFriends(): Promise<void> {
     loading.value = true
     try {
       const page = await getFriends()
-      friends.value = page.items
+      friends.value = page.items.map((item) => {
+        const pending = pendingPresence.get(item.user_id)
+        if (pending) {
+          pendingPresence.delete(item.user_id)
+          return { ...item, presence: pending }
+        }
+        return item
+      })
     } finally {
       loading.value = false
     }
@@ -46,7 +55,11 @@ export const useFriendsStore = defineStore('friends', () => {
 
   function setPresence(userId: string, presence: Presence): void {
     const f = friends.value.find((x) => x.user_id === userId)
-    if (f) f.presence = presence
+    if (f) {
+      f.presence = presence
+      return
+    }
+    pendingPresence.set(userId, presence)
   }
 
   return {

@@ -18,6 +18,7 @@ export class RealtimeClient {
   private lastErrorToastAt = 0
   /** Bumped on every socket replace so stale handlers become no-ops. */
   private generation = 0
+  private visibilityWired = false
 
   on(event: string, handler: WsEventHandler): void {
     if (!this.handlers.has(event)) {
@@ -59,6 +60,11 @@ export class RealtimeClient {
   connect(): void {
     const token = getAccessToken()
     if (!token) return
+
+    if (!this.visibilityWired) {
+      this.visibilityWired = true
+      this.wireVisibilityReconnect()
+    }
 
     this.shouldReconnect = true
     this.intentionalClose = false
@@ -177,6 +183,16 @@ export class RealtimeClient {
     for (const item of queued) {
       this.ws.send(JSON.stringify({ event: item.event, data: item.data }))
     }
+  }
+
+  /** Mobile browsers suspend WS in background — reconnect when tab is visible again. */
+  private wireVisibilityReconnect(): void {
+    if (typeof document === 'undefined') return
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return
+      if (!this.shouldReconnect || this.intentionalClose) return
+      this.ensureConnected()
+    })
   }
 
   private startPing(): void {
